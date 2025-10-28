@@ -7,3 +7,8 @@
 pycycle.egg-info/*
 /build*
 *testflo_report.out
+*.pdf
+*.txt
+*.openmdao_out
+*.html
+*/PKG-INFO
