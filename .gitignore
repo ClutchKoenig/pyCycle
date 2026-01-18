@@ -12,3 +12,4 @@ pycycle.egg-info/*
 *.openmdao_out
 *.html
 */PKG-INFO
+*.out
