@@ -12,7 +12,8 @@ class baseline_engine(pyc.Cycle):
     No Off-Design points — just a single Cycle for the design point.
     """
     def setup(self):
-        
+        design = self.options['design']
+
         USE_TABULAR = False
 
         self.options['thermo_method'] ='CEA'
@@ -96,37 +97,69 @@ class baseline_engine(pyc.Cycle):
                            HPC_PR={'val':15, 'units':None},
                            OPR = {'val':50, 'units':None}))
 
-
-        balance = self.add_subsystem('balance', om.BalanceComp())
+        self.add_subsystem('ideal_jet_velocity_ratio', om.ExecComp('vr_id = v18 / v8', 
+                                                                   v18 = {'val':300, 'units': 'ft/s'},
+                                                                   v8={'val':50, 'units': 'ft/s'}))
         
-        # Design-Punkt Balances
-        # Thrust requirement = 27kN
-        balance.add_balance('W', units = 'lbm/s' , eq_units = 'lbf')
-        self.connect('balance.W', 'flight_cond.W')
-        self.connect('performance.Fn', 'balance.lhs:W')
-        self.promotes('balance', inputs=[('rhs:W', 'Fn_REQUIREMENT')])
+        balance = self.add_subsystem('balance', om.BalanceComp())
+        if design:
+            self.add_subsystem('geometry', om.ExecComp(core_nozz_exit={'val':80, 'units':'inch**2'},
+                                                       byp_nozzle_exit={'val':200, 'units':'inch**2'}))
+            # Balancing of the 
+            balance.add_balance('W', units = 'lbm/s', eq_units = 'inch**2')
+            self.connect('balance.W','flight_cond.W')
+            self.connect('core_nozzle.Fl_O:stat:area','balance.W:lhs')
+            self.connect('balance', inputs=['rhs:W','geometry.core_nozz_exit'])
+            
+            self.add_balance('BPR', units = None, eq_units = 'inch**2')
+            self.connect('balance.BPR','splitter.BPR')
+            self.connect('bypass_nozzle.Fl_O:stat:area','balance.BPR:lhs')
+            self.connect('balance', inputs=['rhs:BPR', 'geometry.byp_nozzle_exit'])
 
-        # Turbine entry temperature rq =1700K
-        balance.add_balance('FAR', eq_units = 'degR')
-        self.connect('balance.FAR', 'burner.Fl_I:FAR')
-        self.connect('burner.Fl_O:tot:T', 'balance.lhs:FAR')
-        self.promotes('balance', inputs=[('rhs:FAR', 'T4_REQUIREMENT')])
+            self.add_balance('OPR', units = None, eq_units = None)
+            self.connect('balance.OPR')
+            # ================================================= 
+            # ======== Balances for energy conservation ========
+            balance.add_balance('lpt_PR', eq_units='hp', rhs_val=0., res_ref=1e4)
+            self.connect('balance.lpt_PR', 'lp_turbine.PR')
+            self.connect('lp_shaft.pwr_net', 'balance.lhs:lpt_PR')
+
+            balance.add_balance('hpt_PR', eq_units='hp', rhs_val = 0., res_ref=1e4)
+            self.connect('balance.hpt_PR','hp_turbine.PR')
+            self.connect('hp_shaft.pwr_net', 'balance.lhs:hpt_PR')
+            # ==================================================
+
+        else: 
+            # Design-Punkt Balances
+            # Thrust requirement = 27kN
+            balance.add_balance('W', units = 'lbm/s' , eq_units = 'lbf')
+            self.connect('balance.W', 'flight_cond.W')
+            self.connect('performance.Fn', 'balance.lhs:W')
+            self.promotes('balance', inputs=[('rhs:W', 'Fn_REQUIREMENT')])
+
+            # Turbine entry temperature rq =1700K
+            balance.add_balance('FAR', eq_units = 'degR')
+            self.connect('balance.FAR', 'burner.Fl_I:FAR')
+            self.connect('burner.Fl_O:tot:T', 'balance.lhs:FAR')
+            self.promotes('balance', inputs=[('rhs:FAR', 'T4_REQUIREMENT')])
+        
+                    # ================================================= 
+            # ======== Balances for energy conservation ========
+            balance.add_balance('lpt_PR', eq_units='hp', rhs_val=0., res_ref=1e4)
+            self.connect('balance.lpt_PR', 'lp_turbine.PR')
+            self.connect('lp_shaft.pwr_net', 'balance.lhs:lpt_PR')
+
+            balance.add_balance('hpt_PR', eq_units='hp', rhs_val = 0., res_ref=1e4)
+            self.connect('balance.hpt_PR','hp_turbine.PR')
+            self.connect('hp_shaft.pwr_net', 'balance.lhs:hpt_PR')
+            # ==================================================
 
         balance.add_balance('lpc_PR', val=3, units=None, eq_units=None)
         self.connect('balance.lpc_PR', ['opr_comp.LPC_PR','lp_compressor.PR'])
         self.connect('opr_comp.OPR','balance.lhs:lpc_PR')
         self.promotes('balance', inputs=[('rhs:lpc_PR', 'OPR_REQUIREMENT')])
         
-        # ================================================= 
-        # ======== Balances for energy conservation ========
-        balance.add_balance('lpt_PR', eq_units='hp', rhs_val=0., res_ref=1e4)
-        self.connect('balance.lpt_PR', 'lp_turbine.PR')
-        self.connect('lp_shaft.pwr_net', 'balance.lhs:lpt_PR')
 
-        balance.add_balance('hpt_PR', eq_units='hp', rhs_val = 0., res_ref=1e4)
-        self.connect('balance.hpt_PR','hp_turbine.PR')
-        self.connect('hp_shaft.pwr_net', 'balance.lhs:hpt_PR')
-        # ==================================================
 
         # ======= Inlet Flow =========
         self.pyc_connect_flow('flight_cond.Fl_O','inlet.Fl_I')
@@ -241,6 +274,29 @@ def viewer(prob, pt, file=sys.stdout):
     pyc.print_bleed(prob, bleed_full_names, file=file)
 
 
+class MPbaseline_engine(pyc.MPCycle):
+    def setup(self):
+        self.pyc_add_pnt('DESIGN', baseline_engine(thermo_method='CEA'))
+
+        # Set Input Defaults here
+
+
+
+        self.od_pts = ['OD_Thrust']
+        
+
+        self.pyc_add_pnt('OD_Thrust', baseline_engine(design=False, thermo_method='CEA'))
+        self.set_input_defaults('OD_Thrust.flight_cond.alt', 35000, units='ft')
+        self.set_input_defaults('OD_Thrust.flight_cond.MN',0.8)
+
+
+
+
+
+        self.pyc_use_default_des_od_conns()
+
+        self.pyc_connect_des_od('core_nozzle.Throat:stat:area','balance.rhs:W')
+        self.pyc_connect_des_od('bypass_nozzle.Throat:stat:area','balance.rhs:BPR')
 # =============================================================
 # Berechne MA aus Kurzke Tabelle 
 # Vergleiche Ergebnisse von PC mit Kurzke
@@ -262,31 +318,6 @@ def main():
     # Flight conditions
     prob.set_val('flight_cond.alt', 35000., units='ft')
     prob.set_val('flight_cond.MN', 0.8)
-#    prob.set_val('')
-
-   
-
-    # self.set_input_defaults('DESIGN.inlet.MN', 0.751)
-    # self.set_input_defaults('DESIGN.fan.MN', 0.4578)
-    # self.set_input_defaults('DESIGN.splitter.BPR', 5.105)
-    # self.set_input_defaults('DESIGN.splitter.MN1', 0.3104)
-    # self.set_input_defaults('DESIGN.splitter.MN2', 0.4518)
-    # self.set_input_defaults('DESIGN.duct4.MN', 0.3121)
-    # self.set_input_defaults('DESIGN.lpc.MN', 0.3059)
-    # self.set_input_defaults('DESIGN.duct6.MN', 0.3563)
-    # self.set_input_defaults('DESIGN.hpc.MN', 0.2442)
-    # self.set_input_defaults('DESIGN.bld3.MN', 0.3000)
-    # self.set_input_defaults('DESIGN.burner.MN', 0.1025)
-    # self.set_input_defaults('DESIGN.hpt.MN', 0.3650)
-    # self.set_input_defaults('DESIGN.duct11.MN', 0.3063)
-    # self.set_input_defaults('DESIGN.lpt.MN', 0.4127)
-    # self.set_input_defaults('DESIGN.duct13.MN', 0.4463)
-    # self.set_input_defaults('DESIGN.byp_bld.MN', 0.4489)
-    # self.set_input_defaults('DESIGN.duct15.MN', 0.4589)
-    
-    # self.set_input_defaults('DESIGN.LP_Nmech', 4666.1, units='rpm')
-    # self.set_input_defaults('DESIGN.HP_Nmech', 14705.7, units='rpm')
-
     
     # Compressor/Turbine initial guesses
     prob.set_val('fan.PR', 1.685)
