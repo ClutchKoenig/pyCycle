@@ -97,9 +97,17 @@ class baseline_engine(pyc.Cycle):
                            HPC_PR={'val':15, 'units':None},
                            OPR = {'val':50, 'units':None}))
 
+        self.connect('opr_comp.F_PR','fan.PR')
+        self.connect('opr_comp.LPC_PR','lp_turbine.PR')
+        self.connect('opr_comp.hPC_PR', 'hp_turbine.PR')
+
+
         self.add_subsystem('ideal_jet_velocity_ratio', om.ExecComp('vr_id = v18 / v8', 
                                                                    v18 = {'val':300, 'units': 'ft/s'},
-                                                                   v8={'val':50, 'units': 'ft/s'}))
+                                                                   v8={'val':50, 'units': 'ft/s'},
+                                                                   vr_id={'val':0.8, 'units':None}))
+        self.connect('ideal_jet_velocity_ratio.v18', 'bypass_nozzle.Fl_O:stat:V')
+        self.connect('ideal_jet_velocity_ratio.v8','core_nozzle.Fl_O:stat:V')
         
         balance = self.add_subsystem('balance', om.BalanceComp())
         if design:
@@ -117,7 +125,9 @@ class baseline_engine(pyc.Cycle):
             self.connect('balance', inputs=['rhs:BPR', 'geometry.byp_nozzle_exit'])
 
             self.add_balance('OPR', units = None, eq_units = None)
-            self.connect('balance.OPR')
+            self.connect('balance.OPR', 'ideal_jet_velocity_ratio.vr_id')
+            self.connect('bypass_nozzle')
+
             # ================================================= 
             # ======== Balances for energy conservation ========
             balance.add_balance('lpt_PR', eq_units='hp', rhs_val=0., res_ref=1e4)
@@ -324,7 +334,7 @@ def main():
     prob.set_val('fan.eff', 0.8948)
     prob.set_val('lp_compressor.PR', 1.935)
     prob.set_val('lp_compressor.eff', 0.9243)
-    prob.set_val('hp_compressor.PR', 9.369)
+    prob.set_val('hp_compressor.PR', 15) #Requirement
     prob.set_val('hp_compressor.eff', 0.8707)
     prob.set_val('hp_turbine.eff', 0.8888)
     prob.set_val('lp_turbine.eff', 0.8996)
@@ -365,3 +375,13 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+
+"""
+Stat. 2-13 = Outer LPC
+Stat. 22-24 = IPC
+
+
+
+"""
