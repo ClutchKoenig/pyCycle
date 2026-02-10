@@ -23,7 +23,9 @@ class baseline_engine(pyc.Cycle):
         # Subsysteme:
         self.add_subsystem('flight_cond', pyc.FlightConditions())
         self.add_subsystem('inlet', pyc.Inlet())
-
+        # Möglicherweise muss man Fan in einen inner und outer Fan teilen, 
+        # damit Vergleich zu Kurzke möglichst Akkurat ist
+        # Kurzke gibt inner and outer Pressure Ratios und Effizienz an
         self.add_subsystem('fan', pyc.Compressor(map_data=pyc.FanMap, bleed_names=[], map_extrap=True),
                            promotes_inputs=[('Nmech', 'LP_Nmech')])
         self.add_subsystem('splitter', pyc.Splitter())
@@ -153,7 +155,7 @@ class baseline_engine(pyc.Cycle):
             self.connect('burner.Fl_O:tot:T', 'balance.lhs:FAR')
             self.promotes('balance', inputs=[('rhs:FAR', 'T4_REQUIREMENT')])
         
-                    # ================================================= 
+            # ================================================= 
             # ======== Balances for energy conservation ========
             balance.add_balance('lpt_PR', eq_units='hp', rhs_val=0., res_ref=1e4)
             self.connect('balance.lpt_PR', 'lp_turbine.PR')
@@ -287,24 +289,15 @@ def viewer(prob, pt, file=sys.stdout):
 class MPbaseline_engine(pyc.MPCycle):
     def setup(self):
         self.pyc_add_pnt('DESIGN', baseline_engine(thermo_method='CEA'))
-
+        # self.pyc_add_cycle_param('core_nozzle.Cv',0.93881)
         # Set Input Defaults here
-
-
-
         self.od_pts = ['OD_Thrust']
-        
 
         self.pyc_add_pnt('OD_Thrust', baseline_engine(design=False, thermo_method='CEA'))
         self.set_input_defaults('OD_Thrust.flight_cond.alt', 35000, units='ft')
         self.set_input_defaults('OD_Thrust.flight_cond.MN',0.8)
 
-
-
-
-
         self.pyc_use_default_des_od_conns()
-
         self.pyc_connect_des_od('core_nozzle.Throat:stat:area','balance.rhs:W')
         self.pyc_connect_des_od('bypass_nozzle.Throat:stat:area','balance.rhs:BPR')
 # =============================================================
@@ -312,6 +305,7 @@ class MPbaseline_engine(pyc.MPCycle):
 # Vergleiche Ergebnisse von PC mit Kurzke
 # Modelliere Turboprop mit Daten von Pascal
 # Bis 06.01.2026 nach GPT Labor 
+
 def main():
     """
     Design-only runner: single point calculation for baseline engine.
@@ -330,15 +324,17 @@ def main():
     prob.set_val('flight_cond.MN', 0.8)
     
     # Compressor/Turbine initial guesses
-    prob.set_val('fan.PR', 1.685)
-    prob.set_val('fan.eff', 0.8948)
-    prob.set_val('lp_compressor.PR', 1.935)
-    prob.set_val('lp_compressor.eff', 0.9243)
-    prob.set_val('hp_compressor.PR', 15) #Requirement
-    prob.set_val('hp_compressor.eff', 0.8707)
-    prob.set_val('hp_turbine.eff', 0.8888)
-    prob.set_val('lp_turbine.eff', 0.8996)
-    
+    prob.set_val('DESIGN.fan.PR', 1.37)     # Weiß nicht ob Sinnvoll
+    prob.set_val('fan.eff', 0.9)
+    prob.set_val('lp_compressor.PR', 2.586)
+    prob.set_val('lp_compressor.eff', 0.88)
+    prob.set_val('hp_compressor.PR', 15)    # Requirement
+    prob.set_val('hp_compressor.eff', 0.85)
+    prob.set_val('hp_turbine.eff', 0.91)
+    prob.set_val('lp_turbine.eff', 0.92)
+    prob.set_val('hp_turbine.PR', 4.605)
+    prob.set_val('lp_turbine.PR', 10.168)
+
     # Balance RHS (targets)
     prob.set_val('Fn_REQUIREMENT', 27 * 224.80894387096 , units='lbf') # kN zu lbf ist * 224.80894387096
     prob.set_val('T4_REQUIREMENT', 1700 * 9/5 , units='degR') # K zu Rankine ist * 9/5
@@ -379,9 +375,10 @@ if __name__ == '__main__':
 
 
 """
-Stat. 2-13 = Outer LPC
-Stat. 22-24 = IPC
-
+Stat. 2-13 = Outer LPC (Kurzke) Bypassstrom Fan
+Stat. 02-21 = Inner LPC (Kurzke) Kernstrom Fan 
+Stat. 22-24 = IPC (hier LPC genannt)
+Stat. 
 
 
 """
