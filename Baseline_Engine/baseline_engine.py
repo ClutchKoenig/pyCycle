@@ -291,6 +291,32 @@ class MPbaseline_engine(pyc.MPCycle):
         self.pyc_add_pnt('DESIGN', baseline_engine(thermo_method='CEA'))
         # self.pyc_add_cycle_param('core_nozzle.Cv',0.93881)
         # Set Input Defaults here
+        self.pyc_add_cycle_param('inlet.ram_recovery', 0.995)
+        self.pyc_add_cycle_param('duct_lpc_inlet.dPqP', 0.02)
+        self.pyc_add_cycle_param('duct_hpc_inlet', 0.015)
+        self.pyc_add_cycle_param('burner.dPqP', 0.04)
+        self.pyc_add_cycle_param('duct_lpt_inlet.dPqP', 0)
+        self.pyc_add_cycle_param('duct_core_outlet', 0.01001)
+        self.pyc_add_cycle_param('duct_bp.dPqP', 0.03)
+
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_vanes_cool:frac_W',0.16)
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_blades_cool:frac_W',0.09)
+
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_vanes_cool:frac_P',1)
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_blades_cool:frac_P',1)
+                
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_vanes_cool:frac_work')#?
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_blades_cool:frac_work')#?
+
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_vanes_cool:frac_W', 0.03333)
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_blades_cool:frac_W', 0.00667)
+
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_vanes_cool:frac_P')#?
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_blades_cool:frac_P')#?
+
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_vanes_cool:frac_work')#?
+        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_blades_cool:frac_work')#?
+
         self.od_pts = ['OD_Thrust']
 
         self.pyc_add_pnt('OD_Thrust', baseline_engine(design=False, thermo_method='CEA'))
@@ -325,14 +351,21 @@ def main():
     
     # Compressor/Turbine initial guesses
     prob.set_val('DESIGN.fan.PR', 1.37)     # Weiß nicht ob Sinnvoll
+
     prob.set_val('fan.eff', 0.9)
-    prob.set_val('lp_compressor.PR', 2.586)
-    prob.set_val('lp_compressor.eff', 0.88)
-    prob.set_val('hp_compressor.PR', 15)    # Requirement
-    prob.set_val('hp_compressor.eff', 0.85)
+    prob.set_val('DESIGN.geometry.core_nozzle_exit',0.37809, units='m**2')
+    prob.set_val('DESIGN.geometry.byp_nozzle_exit', 2.41186, units='m**2')
+
+    prob.set_val('lp_compressor.PR', 2.586) # IP Compressor
+    prob.set_val('lp_compressor.eff', 0.88) # IP Compressor
+
+    prob.set_val('hp_compressor.PR', 15)    # HP Compressor
+    prob.set_val('hp_compressor.eff', 0.85) # HP Compressor
+
     prob.set_val('hp_turbine.eff', 0.91)
-    prob.set_val('lp_turbine.eff', 0.92)
     prob.set_val('hp_turbine.PR', 4.605)
+    
+    prob.set_val('lp_turbine.eff', 0.92)
     prob.set_val('lp_turbine.PR', 10.168)
 
     # Balance RHS (targets)
