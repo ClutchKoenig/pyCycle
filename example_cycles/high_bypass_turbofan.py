@@ -326,24 +326,32 @@ class MPhbtf(pyc.MPCycle):
         self.pyc_add_cycle_param('duct11.dPqP', 0.0051)
         self.pyc_add_cycle_param('duct13.dPqP', 0.0107)
         self.pyc_add_cycle_param('duct15.dPqP', 0.0149)
+
         self.pyc_add_cycle_param('core_nozz.Cv', 0.9933)
         self.pyc_add_cycle_param('byp_bld.bypBld:frac_W', 0.005)
         self.pyc_add_cycle_param('byp_nozz.Cv', 0.9939)
+
         self.pyc_add_cycle_param('hpc.cool1:frac_W', 0.050708)
         self.pyc_add_cycle_param('hpc.cool1:frac_P', 0.5)
         self.pyc_add_cycle_param('hpc.cool1:frac_work', 0.5)
+
         self.pyc_add_cycle_param('hpc.cool2:frac_W', 0.020274)
         self.pyc_add_cycle_param('hpc.cool2:frac_P', 0.55)
         self.pyc_add_cycle_param('hpc.cool2:frac_work', 0.5)
+
         self.pyc_add_cycle_param('bld3.cool3:frac_W', 0.067214)
         self.pyc_add_cycle_param('bld3.cool4:frac_W', 0.101256)
         self.pyc_add_cycle_param('hpc.cust:frac_P', 0.5)
+
         self.pyc_add_cycle_param('hpc.cust:frac_work', 0.5)
         self.pyc_add_cycle_param('hpc.cust:frac_W', 0.0445)
+
         self.pyc_add_cycle_param('hpt.cool3:frac_P', 1.0)
         self.pyc_add_cycle_param('hpt.cool4:frac_P', 0.0)
+        
         self.pyc_add_cycle_param('lpt.cool1:frac_P', 1.0)
         self.pyc_add_cycle_param('lpt.cool2:frac_P', 0.0)
+        
         self.pyc_add_cycle_param('hp_shaft.HPX', 250.0, units='hp')
 
         self.od_pts = ['OD_full_pwr', 'OD_part_pwr']

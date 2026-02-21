@@ -26,33 +26,40 @@ class baseline_engine(pyc.Cycle):
         # Möglicherweise muss man Fan in einen inner und outer Fan teilen, 
         # damit Vergleich zu Kurzke möglichst Akkurat ist
         # Kurzke gibt inner and outer Pressure Ratios und Effizienz an
-        self.add_subsystem('fan', pyc.Compressor(map_data=pyc.FanMap, bleed_names=[], map_extrap=True),
-                           promotes_inputs=[('Nmech', 'LP_Nmech')])
+        self.add_subsystem('fan', pyc.Compressor(map_data=pyc.FanMap, 
+                                                 bleed_names=[], 
+                                                 map_extrap=True),
+                                                 promotes_inputs=[('Nmech', 'LP_Nmech')])
         self.add_subsystem('splitter', pyc.Splitter())
         self.add_subsystem('duct_lpc_inlet', pyc.Duct())
         # bypass doesnt use nozzle
         self.add_subsystem('duct_bp', pyc.Duct())
-        self.add_subsystem('lp_compressor', pyc.Compressor(map_data = pyc.LPCMap, map_extrap=True), 
-                           promotes_inputs=[('Nmech', 'LP_Nmech')])
+        self.add_subsystem('lp_compressor', pyc.Compressor(map_data = pyc.LPCMap, 
+                                                           map_extrap=True),
+                                                           promotes_inputs=[('Nmech', 'LP_Nmech')])
         
 
         self.add_subsystem('duct_hpc_inlet', pyc.Duct())
         self.add_subsystem('hp_compressor', pyc.Compressor(map_data=pyc.HPCMap, 
-                                                           map_extrap=True),
-                                                           promotes_inputs = [('Nmech', 'HP_Nmech')])
-        self.add_subsystem('bleed_hpc_exit', pyc.BleedOut(bleed_names=['bleed_hpt_vanes_cool', 'bleed_hpt_blades_cool', 'bleed_lpt_vanes_cool', 'bleed_lpt_blades_cool']))
+                                                           map_extrap=True,
+                                                           bleed_names=['lpt_vanes_cool', 'lpt_blades_cool']),
+                                                           promotes_inputs = [('Nmech', 'HP_Nmech')],)
+        
+        self.add_subsystem('bleed_hpc_exit', pyc.BleedOut(bleed_names=['hpt_vanes_cool', 'hpt_blades_cool']))
         # p. 305 fig. 8.2 no bleed in this config - 02.12.25: quatsch! 
         # Bleed wird am Austritt des HPC abgenommen siehe p.306 Table
 
         self.add_subsystem('burner', pyc.Combustor(fuel_type=FUEL_TYPE))
 
         self.add_subsystem('hp_turbine', pyc.Turbine(map_data=pyc.HPTMap, map_extrap = True, 
-                           bleed_names=['bleed_hpt_vanes_cool', 'bleed_hpt_blades_cool']),
-                           promotes_inputs=[('Nmech', 'HP_Nmech')])
+                                                     bleed_names=['hpt_vanes', 'hpt_blades']),
+                                                     promotes_inputs=[('Nmech', 'HP_Nmech')])
+        
         self.add_subsystem('duct_lpt_inlet', pyc.Duct())
-        self.add_subsystem('lp_turbine', pyc.Turbine(map_data = pyc.LPTMap, map_extrap = True,
-                           bleed_names=['bleed_lpt_vanes_cool','bleed_lpt_blades_cool']),
-                           promotes_inputs=[('Nmech','LP_Nmech')])
+
+        self.add_subsystem('lp_turbine', pyc.Turbine(map_data = pyc.LPTMap, map_extrap = True, 
+                                                     bleed_names=['lpt_vanes','lpt_blades']),
+                                                     promotes_inputs=[('Nmech','LP_Nmech')])
         # no nozzle behind last turbine stage, 
         # warum?
         self.add_subsystem('duct_core_outlet', pyc.Duct())
@@ -61,7 +68,7 @@ class baseline_engine(pyc.Cycle):
 
         #self.add_subsystem('duct')
 
-        #Create shafts (unfinsihed)
+
         self.add_subsystem('lp_shaft', pyc.Shaft(num_ports=3))
         self.add_subsystem('fan_gearbox', pyc.Gearbox(),
                            promotes_inputs = [('N_in','LP_Nmech'),('N_out','Fan_Nmech')]) # add details
@@ -72,7 +79,7 @@ class baseline_engine(pyc.Cycle):
         self.add_subsystem('hp_shaft', pyc.Shaft(num_ports=2))
         self.add_subsystem('performance', pyc.Performance(num_nozzles=2, num_burners=1))
         
-        # am 03.12 weiter mit verbindungen
+
         self.connect('inlet.Fl_O:tot:P', 'performance.Pt2')
         self.connect('hp_compressor.Fl_O:tot:P', 'performance.Pt3')
         self.connect('burner.Wfuel', 'performance.Wfuel_0')
@@ -92,46 +99,65 @@ class baseline_engine(pyc.Cycle):
         self.connect('hp_compressor.trq','hp_shaft.trq_0')
         self.connect('hp_turbine.trq','hp_shaft.trq_1')
         
-        # Definition BPR Komponente
+        # Definition OPR Komponente
         self.add_subsystem('opr_comp',om.ExecComp('OPR=F_PR * LPC_PR * HPC_PR',
-                           F_PR={'val':1.2, 'units': None},
-                           LPC_PR={'val':3, 'units':None},
-                           HPC_PR={'val':15, 'units':None},
-                           OPR = {'val':50, 'units':None}))
-
-        self.connect('opr_comp.F_PR','fan.PR')
-        self.connect('opr_comp.LPC_PR','lp_turbine.PR')
-        self.connect('opr_comp.hPC_PR', 'hp_turbine.PR')
-
+                                                  F_PR={'val':1.2, 'units': None},
+                                                  LPC_PR={'val':3, 'units':None},
+                                                  HPC_PR={'val':15, 'units':None},
+                                                  OPR = {'val':50, 'units':None}))
+        # ===
+        # adjusted order here - value of left conenction is written into right variable
+        # self.connect('fan.PR', 'opr_comp.F_PR')
+        # self.connect('lp_compressor.PR', 'opr_comp.LPC_PR')
+        # self.connect('hp_compressor.PR', 'opr_comp.HPC_PR')
+        # ===
 
         self.add_subsystem('ideal_jet_velocity_ratio', om.ExecComp('vr_id = v18 / v8', 
                                                                    v18 = {'val':300, 'units': 'ft/s'},
                                                                    v8={'val':50, 'units': 'ft/s'},
                                                                    vr_id={'val':0.8, 'units':None}))
-        self.connect('ideal_jet_velocity_ratio.v18', 'bypass_nozzle.Fl_O:stat:V')
-        self.connect('ideal_jet_velocity_ratio.v8','core_nozzle.Fl_O:stat:V')
-        
+        # ===
+        # adjusted order here - value of left conenction is written into right variable
+        self.connect('bypass_nozzle.Fl_O:stat:V', 'ideal_jet_velocity_ratio.v18')
+        self.connect('core_nozzle.Fl_O:stat:V', 'ideal_jet_velocity_ratio.v8')
+        # === 
+        #self.add_subsystem('geometry', om.ExecComp(core_nozz_exit={'val':80, 'units':'inch**2'},
+                                                   #byp_nozzle_exit={'val':200, 'units':'inch**2'}))
         balance = self.add_subsystem('balance', om.BalanceComp())
         if design:
             self.add_subsystem('geometry', om.ExecComp(core_nozz_exit={'val':80, 'units':'inch**2'},
-                                                       byp_nozzle_exit={'val':200, 'units':'inch**2'}))
-            # Balancing of the 
+                                                       byp_nozz_exit={'val':200, 'units':'inch**2'}))
+            
+            # ========================================================================
+            # Forcing same Dimension of Engine using Kurzkes Nozzle Diameters
             balance.add_balance('W', units = 'lbm/s', eq_units = 'inch**2')
             self.connect('balance.W','flight_cond.W')
-            self.connect('core_nozzle.Fl_O:stat:area','balance.W:lhs')
-            self.connect('balance', inputs=['rhs:W','geometry.core_nozz_exit'])
+            self.connect('core_nozzle.Throat:stat:area','balance.lhs:W')
+            self.promotes('balance', inputs=[('rhs:W','geometry.core_nozz_exit')])
             
-            self.add_balance('BPR', units = None, eq_units = 'inch**2')
+            balance.add_balance('BPR', units = None, eq_units = 'inch**2')
             self.connect('balance.BPR','splitter.BPR')
-            self.connect('bypass_nozzle.Fl_O:stat:area','balance.BPR:lhs')
-            self.connect('balance', inputs=['rhs:BPR', 'geometry.byp_nozzle_exit'])
+            self.connect('bypass_nozzle.Throat:stat:area','balance.lhs:BPR')
+            self.promotes('balance', inputs=[('rhs:BPR', 'geometry.byp_nozz_exit')])
 
-            self.add_balance('OPR', units = None, eq_units = None)
-            self.connect('balance.OPR', 'ideal_jet_velocity_ratio.vr_id')
-            self.connect('bypass_nozzle')
+            # ========================================================================
+            # Forcing the ideal jet velocity ratio of v_id = 0.8 by adjusting fan pressure ratio
+            balance.add_balance('fan_PR', units = None, eq_units = None)
+            self.connect('balance.fan_PR', ['fan.PR', 'opr_comp.F_PR'])
+            self.connect('ideal_jet_velocity_ratio.vr_id', 'balance.lhs:fan_PR')
+            self.promotes('balance', inputs=[('rhs:fan_PR', 'vr_id_REQUIREMENT')])
 
-            # ================================================= 
+            # Forcing overall pressure ratio = 50 by adjusting lpc pressure ratio (hpc PR = 15 & fan PR balanced by ) 
+            balance.add_balance('lpc_PR', units=None, eq_units= None)
+            self.connect('balance.lpc_PR', ['lp_compressor.PR', 'opr_comp.LPC_PR'])
+            self.connect('opr_comp.OPR', 'balance.lhs:lpc_PR')
+            self.promotes('balance', inputs=[('rhs:lpc_PR', 'OPR_REQUIREMENT')])
+
+
+            # # ================================================= 
             # ======== Balances for energy conservation ========
+            # We adjust the PR of the Turbine in order to supply the exact amount of power we need to drive the other components for i.e. compressors
+            # right hand side value = 0 , meaning net power should be 0 in order for energy conservatiopn to hold
             balance.add_balance('lpt_PR', eq_units='hp', rhs_val=0., res_ref=1e4)
             self.connect('balance.lpt_PR', 'lp_turbine.PR')
             self.connect('lp_shaft.pwr_net', 'balance.lhs:lpt_PR')
@@ -140,36 +166,49 @@ class baseline_engine(pyc.Cycle):
             self.connect('balance.hpt_PR','hp_turbine.PR')
             self.connect('hp_shaft.pwr_net', 'balance.lhs:hpt_PR')
             # ==================================================
-
-        else: 
-            # Design-Punkt Balances
-            # Thrust requirement = 27kN
-            balance.add_balance('W', units = 'lbm/s' , eq_units = 'lbf')
-            self.connect('balance.W', 'flight_cond.W')
-            self.connect('performance.Fn', 'balance.lhs:W')
-            self.promotes('balance', inputs=[('rhs:W', 'Fn_REQUIREMENT')])
-
+            
+            # ==================================================
             # Turbine entry temperature rq =1700K
             balance.add_balance('FAR', eq_units = 'degR')
             self.connect('balance.FAR', 'burner.Fl_I:FAR')
             self.connect('burner.Fl_O:tot:T', 'balance.lhs:FAR')
             self.promotes('balance', inputs=[('rhs:FAR', 'T4_REQUIREMENT')])
-        
+            """
+            Summary of Design Balances:
+
+            Variable adjusted - Design-Variable 
+            W: mass flow             -   A8: core nozzle area     
+            BPR: Bypass ratio        -   A18: bypass nozzle area
+            fan_PR: pressuure rat.   -   vr_id: ideal velocity ratio
+            lpc_PR: pressure rat.    -   OPR: overall pressure ratio 
+            FAR: Fuel air ratio      -   T405: Turbine entry Temperature (before first guide vanes) 
+            lp_Nmech: lp shaft speed -   Energy conservation of shaft
+            hp_Nmech: hp shaft speed -   Energy conservation of shaft
+            """
+
+        else:
+
             # ================================================= 
             # ======== Balances for energy conservation ========
-            balance.add_balance('lpt_PR', eq_units='hp', rhs_val=0., res_ref=1e4)
-            self.connect('balance.lpt_PR', 'lp_turbine.PR')
-            self.connect('lp_shaft.pwr_net', 'balance.lhs:lpt_PR')
+            # Using Shaft speed to guarantee conservation instead of pressure ratios 
+            
+            balance.add_balance('lp_Nmech', val=1.5, units='rpm', eq_units='hp', 
+                                lower=500., use_mult=True, mult_val=-1)
+            self.connect('balance.lp_Nmech', 'LP_Nmech')
+            self.connect('lp_shaft.pwr_in_real', 'balance.lhs:lp_Nmech')
+            self.connect('lp_shaft.pwr_out_real', 'balance.rhs:lp_Nmech')
 
-            balance.add_balance('hpt_PR', eq_units='hp', rhs_val = 0., res_ref=1e4)
-            self.connect('balance.hpt_PR','hp_turbine.PR')
-            self.connect('hp_shaft.pwr_net', 'balance.lhs:hpt_PR')
-            # ==================================================
-
-        balance.add_balance('lpc_PR', val=3, units=None, eq_units=None)
-        self.connect('balance.lpc_PR', ['opr_comp.LPC_PR','lp_compressor.PR'])
-        self.connect('opr_comp.OPR','balance.lhs:lpc_PR')
-        self.promotes('balance', inputs=[('rhs:lpc_PR', 'OPR_REQUIREMENT')])
+            self.add_balance('hp_Nmech', val=1.5, units='rpm', eq_units='hp',
+                             lower=500., use_mult = True, mult_val=-1)
+            self.connect('balance.hp_Nmech', 'hp_Nmech')
+            self.connect('hp_shaft.pwr_in_real', 'balance.lhs:hp_Nmech')
+            self.connect('hp_shaft.pwr_out_real', 'balance.rhs:hp_Nmech')
+             
+            # Thrust requirement = 27kN
+            balance.add_balance('W', units = 'lbm/s' , eq_units = 'lbf')
+            self.connect('balance.W', 'flight_cond.W')
+            self.connect('performance.Fn', 'balance.lhs:W')
+            self.promotes('balance', inputs=[('rhs:W', 'Fn_REQUIREMENT')])
         
 
 
@@ -192,11 +231,13 @@ class baseline_engine(pyc.Cycle):
         self.pyc_connect_flow('duct_core_outlet.Fl_O', 'core_nozzle.Fl_I')
         
         # ==== Bleed Flows ====
-        self.pyc_connect_flow('bleed_hpc_exit.bleed_hpt_vanes_cool', 'hp_turbine.bleed_hpt_vanes_cool', connect_stat=False)
-        self.pyc_connect_flow('bleed_hpc_exit.bleed_hpt_blades_cool', 'hp_turbine.bleed_hpt_blades_cool', connect_stat=False)
 
-        self.pyc_connect_flow('bleed_hpc_exit.bleed_lpt_vanes_cool', 'lp_turbine.bleed_lpt_vanes_cool', connect_stat=False)
-        self.pyc_connect_flow('bleed_hpc_exit.bleed_lpt_blades_cool', 'lp_turbine.bleed_lpt_blades_cool', connect_stat=False)
+        # From HPC Exit:
+        self.pyc_connect_flow('bleed_hpc_exit.hpt_vanes_cool', 'hp_turbine.hpt_vanes', connect_stat=False)
+        self.pyc_connect_flow('bleed_hpc_exit.hpt_blades_cool', 'hp_turbine.hpt_blades', connect_stat=False)
+        # From inside HPC:
+        self.pyc_connect_flow('hp_compressor.lpt_vanes_cool', 'lp_turbine.lpt_vanes', connect_stat=False)
+        self.pyc_connect_flow('hp_compressor.lpt_blades_cool', 'lp_turbine.lpt_blades', connect_stat=False)
         
         # ======= Bypass Flow =========
         self.pyc_connect_flow('splitter.Fl_O2', 'duct_bp.Fl_I')
@@ -293,39 +334,49 @@ class MPbaseline_engine(pyc.MPCycle):
         # Set Input Defaults here
         self.pyc_add_cycle_param('inlet.ram_recovery', 0.995)
         self.pyc_add_cycle_param('duct_lpc_inlet.dPqP', 0.02)
-        self.pyc_add_cycle_param('duct_hpc_inlet', 0.015)
+        self.pyc_add_cycle_param('duct_hpc_inlet.dPqP', 0.015)
         self.pyc_add_cycle_param('burner.dPqP', 0.04)
         self.pyc_add_cycle_param('duct_lpt_inlet.dPqP', 0)
-        self.pyc_add_cycle_param('duct_core_outlet', 0.01001)
+        self.pyc_add_cycle_param('duct_core_outlet.dPqP', 0.01001)
         self.pyc_add_cycle_param('duct_bp.dPqP', 0.03)
 
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_vanes_cool:frac_W',0.16)
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_blades_cool:frac_W',0.09)
+        # Frac_P and Frac_Work 1: End of the compressor 0: Beginning of Compressor
+        self.pyc_add_cycle_param('hp_compressor.lpt_vanes_cool:frac_W',0.03333)
+        self.pyc_add_cycle_param('hp_compressor.lpt_blades_cool:frac_W',0.00667)
 
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_vanes_cool:frac_P',1)
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_blades_cool:frac_P',1)
+        self.pyc_add_cycle_param('hp_compressor.lpt_vanes_cool:frac_P',0.22477)    #Approximated from Excel 
+        self.pyc_add_cycle_param('hp_compressor.lpt_blades_cool:frac_P',0.22477)    # Approximated from Excel. Assuming the bleed extracts at 500 kPa
                 
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_vanes_cool:frac_work')#?
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_hpt_blades_cool:frac_work')#?
+        self.pyc_add_cycle_param('hp_compressor.lpt_vanes_cool:frac_work',0.23)#?
+        self.pyc_add_cycle_param('hp_compressor.lpt_blades_cool:frac_work',0.23)#?
 
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_vanes_cool:frac_W', 0.03333)
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_blades_cool:frac_W', 0.00667)
+        self.pyc_add_cycle_param('bleed_hpc_exit.hpt_vanes_cool:frac_W', 0.16)
+        self.pyc_add_cycle_param('bleed_hpc_exit.hpt_blades_cool:frac_W', 0.09 )
 
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_vanes_cool:frac_P')#?
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_blades_cool:frac_P')#?
+        #self.pyc_add_cycle_param('bleed_hpc_exit.lpt_vanes_cool:frac_P', 0)     # The bleed is extracted at the end of the compressor
+        #self.pyc_add_cycle_param('bleed_hpc_exit.lpt_blades_cool:frac_P',0)# Approximated from Excel 
+        
+        # 1: Mixing at Turbine Entry ; 0: Mixing at Turbine Outlet
+        self.pyc_add_cycle_param('hp_turbine.hpt_vanes:frac_P', 1) # 
+        self.pyc_add_cycle_param('hp_turbine.hpt_blades:frac_P',0) # 
 
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_vanes_cool:frac_work')#?
-        self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_blades_cool:frac_work')#?
 
-        self.od_pts = ['OD_Thrust']
+        self.pyc_add_cycle_param('lp_turbine.lpt_vanes:frac_P',1)  #
+        self.pyc_add_cycle_param('lp_turbine.lpt_blades:frac_P',0) #
 
-        self.pyc_add_pnt('OD_Thrust', baseline_engine(design=False, thermo_method='CEA'))
-        self.set_input_defaults('OD_Thrust.flight_cond.alt', 35000, units='ft')
-        self.set_input_defaults('OD_Thrust.flight_cond.MN',0.8)
 
-        self.pyc_use_default_des_od_conns()
-        self.pyc_connect_des_od('core_nozzle.Throat:stat:area','balance.rhs:W')
-        self.pyc_connect_des_od('bypass_nozzle.Throat:stat:area','balance.rhs:BPR')
+        #self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_vanes_cool:frac_work')#?
+        #self.pyc_add_cycle_param('bleed_hpc_exit.bleed_lpt_blades_cool:frac_work')#? no idea how I would figure that out without enthalpy data in kurzke
+
+        # self.od_pts = ['OD_Thrust']
+
+        # self.pyc_add_pnt('OD_Thrust', baseline_engine(design=False, thermo_method='CEA'))
+        # self.set_input_defaults('OD_Thrust.flight_cond.alt', 35000, units='ft')
+        # self.set_input_defaults('OD_Thrust.flight_cond.MN',0.8)
+
+        # self.pyc_use_default_des_od_conns()
+        # self.pyc_connect_des_od('core_nozzle.Throat:stat:area','balance.rhs:W')
+        # self.pyc_connect_des_od('bypass_nozzle.Throat:stat:area','balance.rhs:BPR')
 # =============================================================
 # Berechne MA aus Kurzke Tabelle 
 # Vergleiche Ergebnisse von PC mit Kurzke
@@ -340,45 +391,51 @@ def main():
     # Hier sind noch die Machzahlen zur Dimensionierung des Triebwerks
     # zu implementieren
     prob = om.Problem()
-    prob.model = baseline_engine()
+    prob.model = MPbaseline_engine()
     
     prob.setup()
     
     # ========== Set Design Point Parameters ==========
     # Flight conditions
-    prob.set_val('flight_cond.alt', 35000., units='ft')
-    prob.set_val('flight_cond.MN', 0.8)
+    prob.set_val('DESIGN.flight_cond.alt', 35000., units='ft')
+    prob.set_val('DESIGN.flight_cond.MN', 0.8)
     
     # Compressor/Turbine initial guesses
     prob.set_val('DESIGN.fan.PR', 1.37)     # Weiß nicht ob Sinnvoll
 
-    prob.set_val('fan.eff', 0.9)
-    prob.set_val('DESIGN.geometry.core_nozzle_exit',0.37809, units='m**2')
-    prob.set_val('DESIGN.geometry.byp_nozzle_exit', 2.41186, units='m**2')
+    prob.set_val('DESIGN.fan.eff', 0.9)
+    prob.set_val('DESIGN.geometry.core_nozz_exit',0.37809, units='m**2') # Requirement for Engine Matching
+    prob.set_val('DESIGN.geometry.byp_nozz_exit', 2.41186, units='m**2') # Requirement for Engine Matching
 
-    prob.set_val('lp_compressor.PR', 2.586) # IP Compressor
-    prob.set_val('lp_compressor.eff', 0.88) # IP Compressor
+    prob.set_val('DESIGN.lp_compressor.PR', 2.586) # IP Compressor
+    prob.set_val('DESIGN.lp_compressor.eff', 0.88) # IP Compressor
 
-    prob.set_val('hp_compressor.PR', 15)    # HP Compressor
-    prob.set_val('hp_compressor.eff', 0.85) # HP Compressor
+    prob.set_val('DESIGN.hp_compressor.PR', 15)    # HP Compressor
+    prob.set_val('DESIGN.hp_compressor.eff', 0.85) # HP Compressor
 
-    prob.set_val('hp_turbine.eff', 0.91)
-    prob.set_val('hp_turbine.PR', 4.605)
+    prob.set_val('DESIGN.hp_turbine.eff', 0.91)
+    prob.set_val('DESIGN.hp_turbine.PR', 4.605)
     
-    prob.set_val('lp_turbine.eff', 0.92)
-    prob.set_val('lp_turbine.PR', 10.168)
+    prob.set_val('DESIGN.lp_turbine.eff', 0.92)
+    prob.set_val('DESIGN.lp_turbine.PR', 10.168)
+
+    prob.set_val('DESIGN.opr_comp.HPC_PR', 15)
 
     # Balance RHS (targets)
-    prob.set_val('Fn_REQUIREMENT', 27 * 224.80894387096 , units='lbf') # kN zu lbf ist * 224.80894387096
-    prob.set_val('T4_REQUIREMENT', 1700 * 9/5 , units='degR') # K zu Rankine ist * 9/5
-    prob.set_val('OPR_REQUIREMENT', 50.0)  # Overall Pressure Ratio target
+    #prob.set_val('DESIGN.Fn_REQUIREMENT', 27 * 224.80894387096 , units='lbf') # kN zu lbf ist * 224.80894387096
+    prob.set_val('DESIGN.T4_REQUIREMENT', 1700 * 9/5 , units='degR') # K zu Rankine ist * 9/5
+    prob.set_val('DESIGN.OPR_REQUIREMENT', 50.0)  # Overall Pressure Ratio target
     
+    prob.set_val('DESIGN.vr_id_REQUIREMENT', 0.8, units=None)
+
     # Initial guesses for balance states
-    prob['balance.W'] = 100.0
-    prob['balance.FAR'] = 0.025
-    prob['balance.lpc_PR'] = 3.0
-    prob['balance.lpt_PR'] = 4.0
-    prob['balance.hpt_PR'] = 3.0
+    prob['DESIGN.balance.W'] = 100.0
+    prob['DESIGN.balance.FAR'] = 0.025
+    prob['DESIGN.balance.fan_PR'] = 1.3
+    prob['DESIGN.balance.lpc_PR'] = 3.0
+
+    prob['DESIGN.balance.lpt_PR'] = 4.0
+    prob['DESIGN.balance.hpt_PR'] = 3.0
     
     # ========== Run the Model ==========
     prob.set_solver_print(level=2, depth=1)
@@ -405,13 +462,31 @@ def main():
 if __name__ == '__main__':
     main()
 
+    """
+    Summary of Design Balances:
 
+    Variable adjusted - Design-Variable 
+    W: mass flow             -   A8: core nozzle area     
+    BPR: Bypass ratio        -   A18: bypass nozzle area
+    fan_PR: pressuure rat.   -   vr_id: ideal velocity ratio
+    lpc_PR: pressure rat.    -   OPR: overall pressure ratio 
+    FAR: Fuel air ratio      -   T405: Turbine entry Temperature (before first guide vanes) 
+    lp_Nmech: lp shaft speed -   Energy conservation of shaft
+    hp_Nmech: hp shaft speed -   Energy conservation of shaft
+    """
 
 """
 Stat. 2-13 = Outer LPC (Kurzke) Bypassstrom Fan
 Stat. 02-21 = Inner LPC (Kurzke) Kernstrom Fan 
+
 Stat. 22-24 = IPC (hier LPC genannt)
-Stat. 
+Stat. 25-30 = HPC
+Stat. 25/3 - 44/49 = Bleed Extraction early stages HPC --> LPT
+Stat. 3/31 - 4/41 = Bleed Extraction HPC exit --> HPT
+Stat. 31 - 4 = Burner
+Stat. 41 - 44 = HPT
+Stat. 44 - 5 = LPT
+Stat. 5 - 8 Core Nozzle
 
-
+Stat. 13 - 18 Bypass Duct/Nozzle
 """

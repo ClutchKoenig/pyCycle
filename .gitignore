@@ -13,3 +13,4 @@ pycycle.egg-info/*
 *.html
 */PKG-INFO
 *.out
+*.png
