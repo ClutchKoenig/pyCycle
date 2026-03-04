@@ -41,7 +41,7 @@ def get_val(prob, point, element, var_name, units=None):
 
 def print_flow_station(prob, fs_names, file=sys.stdout):
     names = ['tot:P', 'tot:T', 'tot:h', 'tot:S', 'stat:P', 'stat:W', 'stat:MN', 'stat:V', 'stat:area']
-    units = ['kPa', 'K', 'kJ/kg', 'kJ/kg/K', 'kPa', 'kg/s', None, 'm/s', 'm**2']
+
     n_names = len(names)
     line_tmpl = '{:<23}|  '+'{:>13}'*n_names
     len_header = 27+13*n_names
@@ -60,10 +60,9 @@ def print_flow_station(prob, fs_names, file=sys.stdout):
     line_tmpl = '{:<23.23}|  ' + '{:13.3f}'*n_names
     for fs_name in fs_names:
         data = []
-        for index, name in enumerate(names):
+        for name in names:
             full_name = '{}:{}'.format(fs_name, name)
-            unit = units[index]
-            data.append(prob.get_val(full_name, units=unit)[0])
+            data.append(prob[full_name][0])
 
         vals = [fs_name] + data
         print(line_tmpl.format(*vals), file=file, flush=True)
@@ -95,7 +94,7 @@ def print_compressor(prob, element_names, file=sys.stdout):
           eff_temp = prob[e_name+'.eff'][0]
 
         print(line_tmpl.format(e_name, prob[e_name+'.Wc'][0], PR_temp,
-                               eff_temp, prob[e_name+'.eff_poly'][0], prob[e_name+'.Nc'][0], prob.get_val(e_name+'.power', units='kW')[0],
+                               eff_temp, prob[e_name+'.eff_poly'][0], prob[e_name+'.Nc'][0], prob[e_name+'.power'][0],
                                prob[e_name+'.map.RlineMap'][0], prob[e_name+'.map.NcMap'][0], prob[e_name+'.map.PRmap'][0], prob[e_name+'.map.WcMap'][0],
                                prob[e_name+'.map.map.alphaMap'][0], prob[e_name+'.SMN'][0], prob[e_name+'.SMW'][0], prob[e_name+'.map.effMap'][0]),
               file=file, flush=True)
@@ -118,12 +117,12 @@ def print_burner(prob, element_names, file=sys.stdout):
 
         point, _, element = e_name.rpartition(".")
 
-        W_fuel = get_val(prob, point, element, 'Wfuel', units='kg/s')
-        W_tot =  get_val(prob, point, element, 'Fl_O:stat:W', units='kg/s')
+        W_fuel = get_val(prob, point, element, 'Wfuel')
+        W_tot = get_val(prob, point, element, 'Fl_O:stat:W')
         W_air = W_tot - W_fuel
         FAR = W_fuel/W_air
-        dPqP =  get_val(prob, point, element, 'dPqP')
-        T_tot = get_val(prob, point, element, 'Fl_O:tot:T', units='K')
+        dPqP = get_val(prob, point, element, 'dPqP')
+        T_tot = get_val(prob, point, element, 'Fl_O:tot:T')
 
         print(line_tmpl.format(e_name, dPqP, T_tot, W_fuel, FAR),
               file=file, flush=True)
@@ -157,7 +156,7 @@ def print_turbine(prob, element_names, file=sys.stdout):
         Wp = get_val(prob, point, element, 'Wp')
         eff_poly = get_val(prob, point, element, 'eff_poly')
         Np = get_val(prob, point, element, 'Np')
-        power = get_val(prob, point, element, 'power', units='kW')
+        power = get_val(prob, point, element, 'power')
         NpMap = get_val(prob, point, element, 'map.NpMap')
         PRmap = get_val(prob, point, element, 'map.PRmap')
         alphaMap = get_val(prob, point, element, 'map.alphaMap')
@@ -199,8 +198,8 @@ def print_nozzle(prob, element_names, file=sys.stdout):
         area = get_val(prob, point, element, 'Throat:stat:area')
         throat_MN = get_val(prob, point, element, 'Throat:stat:MN')
         MN = get_val(prob, point, element, 'Fl_O:stat:MN')
-        V = get_val(prob, point, element, 'Fl_O:stat:V', units='m/s')
-        Fg = get_val(prob, point, element, 'Fg', units='kN')
+        V = get_val(prob, point, element, 'Fl_O:stat:V')
+        Fg = get_val(prob, point, element, 'Fg')
 
         print(line_tmpl.format(e_name, PR, Cv_val, Cfg_val,
                                area, throat_MN, MN, V, Fg),
@@ -269,13 +268,12 @@ def print_shaft(prob, element_names, file=sys.stdout):
 
     line_tmpl = '{:<20}|  '+'{:20.3f}'*5
     for e_name in element_names:
-        print(line_tmpl.format(e_name, 
-                               prob.get_val(e_name+'.Nmech', units='rpm')[0],
-                               prob.get_val(e_name+'.trq_in', units='N*m')[0],
-                               prob.get_val(e_name+'.trq_out', units='N*m')[0],
-                               prob.get_val(e_name+'.pwr_in', units='kW')[0],
-                               prob.get_val(e_name+'.pwr_out', units='kW')[0],
-                               file=file, flush=True))
+        print(line_tmpl.format(e_name, prob[e_name+'.Nmech'][0],
+                               prob[e_name+'.trq_in'][0],
+                               prob[e_name+'.trq_out'][0],
+                               prob[e_name+'.pwr_in'][0],
+                               prob[e_name+'.pwr_out'][0]),
+              file=file, flush=True)
 
 
 def print_mixer(prob, element_names, file=sys.stdout):

@@ -40,5 +40,8 @@ from pycycle.viewers import print_bleed, print_burner, print_compressor, print_f
                             print_mixer, print_nozzle, print_shaft, print_turbine, \
                             plot_compressor_maps, plot_turbine_maps
 
+# from pycycle.viewers_old import print_bleed, print_burner, print_compressor, print_flow_station, \
+#                             print_mixer, print_nozzle, print_shaft, print_turbine, \
+#                             plot_compressor_maps, plot_turbine_maps
 
 from pycycle.mp_cycle import MPCycle, Cycle
