@@ -4,6 +4,7 @@ import numpy as np
 import openmdao.api as om
 
 import pycycle.api as pyc
+import matplotlib.pyplot as plt
 
 
 class baseline_engine(pyc.Cycle):
@@ -32,7 +33,7 @@ class baseline_engine(pyc.Cycle):
                                                  promotes_inputs=[('Nmech', 'LP_Nmech')])
         self.add_subsystem('splitter', pyc.Splitter())
         self.add_subsystem('duct_lpc_inlet', pyc.Duct())
-        # bypass doesnt use nozzle
+
         self.add_subsystem('duct_bp', pyc.Duct())
         self.add_subsystem('lp_compressor', pyc.Compressor(map_data = pyc.LPCMap, 
                                                            map_extrap=True),
@@ -125,54 +126,66 @@ class baseline_engine(pyc.Cycle):
                                                    #byp_nozzle_exit={'val':200, 'units':'inch**2'}))
         balance = self.add_subsystem('balance', om.BalanceComp())
         if design:
-            self.add_subsystem('geometry', om.ExecComp(core_nozz_exit={'val':80, 'units':'inch**2'},
-                                                       byp_nozz_exit={'val':200, 'units':'inch**2'}))
-            
+            # self.add_subsystem('geometry', om.ExecComp(core_nozz_exit={'val':80, 'units':'inch**2'},
+            #                                            byp_nozz_exit={'val':200, 'units':'inch**2'}))
+
             # ========================================================================
             # Forcing same Dimension of Engine using Kurzkes Nozzle Diameters
-            balance.add_balance('W', units = 'lbm/s', eq_units = 'inch**2')
-            self.connect('balance.W','flight_cond.W')
-            self.connect('core_nozzle.Throat:stat:area','balance.lhs:W')
-            self.promotes('balance', inputs=[('rhs:W','geometry.core_nozz_exit')])
-            
-            balance.add_balance('BPR', units = None, eq_units = 'inch**2')
-            self.connect('balance.BPR','splitter.BPR')
-            self.connect('bypass_nozzle.Throat:stat:area','balance.lhs:BPR')
-            self.promotes('balance', inputs=[('rhs:BPR', 'geometry.byp_nozz_exit')])
+            # balance.add_balance('W', units = 'lbm/s', eq_units = 'inch**2')
+            # self.connect('balance.W','flight_cond.W')
+            # self.connect('core_nozzle.Throat:stat:area','balance.lhs:W')
+            # self.promotes('balance', inputs=[('rhs:W','CORE_AREA_REQ')]) #'geometry.core_nozz_exit'
+
+            # Test: get the bypass area by constraining it and balancing with W
+            balance.add_balance('W', units= 'lbm/s', eq_units='inch**2')
+            self.connect('balance.W', 'flight_cond.W')
+            self.connect('bypass_nozzle.Throat:stat:area', 'balance.lhs:W')
+            self.promotes('balance', inputs=[('rhs:W', 'BYPASS_AREA_REQ')])
+
 
             # ========================================================================
             # Forcing the ideal jet velocity ratio of v_id = 0.8 by adjusting fan pressure ratio
-            balance.add_balance('fan_PR', units = None, eq_units = None)
+            balance.add_balance('fan_PR', units = None, eq_units = None,
+                                lower=1.001, upper=3, 
+                                res_ref=1e4, val=1.5)
             self.connect('balance.fan_PR', ['fan.PR', 'opr_comp.F_PR'])
             self.connect('ideal_jet_velocity_ratio.vr_id', 'balance.lhs:fan_PR')
             self.promotes('balance', inputs=[('rhs:fan_PR', 'vr_id_REQUIREMENT')])
 
             # Forcing overall pressure ratio = 50 by adjusting lpc pressure ratio (hpc PR = 15 & fan PR balanced by ) 
-            balance.add_balance('lpc_PR', units=None, eq_units= None)
-            self.connect('balance.lpc_PR', ['lp_compressor.PR', 'opr_comp.LPC_PR'])
-            self.connect('opr_comp.OPR', 'balance.lhs:lpc_PR')
-            self.promotes('balance', inputs=[('rhs:lpc_PR', 'OPR_REQUIREMENT')])
+            # balance.add_balance('lpc_PR', units=None, eq_units= None)
+            # self.connect('balance.lpc_PR', ['lp_compressor.PR', 'opr_comp.LPC_PR'])
+            # self.connect('opr_comp.OPR', 'balance.lhs:lpc_PR')
+            # self.promotes('balance', inputs=[('rhs:lpc_PR', 'OPR_REQUIREMENT')])
 
 
             # # ================================================= 
             # ======== Balances for energy conservation ========
             # We adjust the PR of the Turbine in order to supply the exact amount of power we need to drive the other components for i.e. compressors
             # right hand side value = 0 , meaning net power should be 0 in order for energy conservatiopn to hold
-            balance.add_balance('lpt_PR', eq_units='hp', rhs_val=0., res_ref=1e4)
+            balance.add_balance('lpt_PR', eq_units='hp', 
+                                rhs_val=0., res_ref=1e4, 
+                                lower=1.001, upper=20,
+                                val=10)
             self.connect('balance.lpt_PR', 'lp_turbine.PR')
             self.connect('lp_shaft.pwr_net', 'balance.lhs:lpt_PR')
 
-            balance.add_balance('hpt_PR', eq_units='hp', rhs_val = 0., res_ref=1e4)
+            balance.add_balance('hpt_PR', eq_units='hp', 
+                                rhs_val = 0., res_ref=1e4,
+                                lower=1.001, upper=10,
+                                val=5)
             self.connect('balance.hpt_PR','hp_turbine.PR')
             self.connect('hp_shaft.pwr_net', 'balance.lhs:hpt_PR')
             # ==================================================
             
             # ==================================================
             # Turbine entry temperature rq =1700K
-            balance.add_balance('FAR', eq_units = 'degR')
+            balance.add_balance('FAR', eq_units = 'degR', 
+                                val=0.015, res_ref=1e4)
             self.connect('balance.FAR', 'burner.Fl_I:FAR')
             self.connect('burner.Fl_O:tot:T', 'balance.lhs:FAR')
             self.promotes('balance', inputs=[('rhs:FAR', 'T4_REQUIREMENT')])
+
             """
             Summary of Design Balances:
 
@@ -272,19 +285,25 @@ def viewer(prob, pt, file=sys.stdout):
     """
 
     if pt == 'DESIGN':
-        MN = prob['DESIGN.fc.Fl_O:stat:MN']
-        LPT_PR = prob['DESIGN.balance.lpt_PR']
-        HPT_PR = prob['DESIGN.balance.hpt_PR']
-        FAR = prob['DESIGN.balance.FAR']
+        MN = prob['DESIGN.flight_cond.Fl_O:stat:MN'][0]
+        LPT_PR = prob['DESIGN.balance.lpt_PR'][0]
+        HPT_PR = prob['DESIGN.balance.hpt_PR'][0]
+        FAR = prob['DESIGN.balance.FAR'][0]
     else:
         MN = prob[pt+'.fc.Fl_O:stat:MN']
         LPT_PR = prob[pt+'.lpt.PR']
         HPT_PR = prob[pt+'.hpt.PR']
         FAR = prob[pt+'.balance.FAR']
 
-    summary_data = (MN[0], prob[pt+'.fc.alt'][0], prob[pt+'.inlet.Fl_O:stat:W'][0], prob[pt+'.perf.Fn'][0],
-                        prob[pt+'.perf.Fg'][0], prob[pt+'.inlet.F_ram'][0], prob[pt+'.perf.OPR'][0],
-                        prob[pt+'.perf.TSFC'][0], prob[pt+'.splitter.BPR'][0])
+    summary_data = (MN, 
+                    prob.get_val(pt+'.flight_cond.alt', units='m')[0],            
+                    prob.get_val(pt+'.inlet.Fl_O:stat:W', units='kg/s')[0],   
+                    prob.get_val(pt+'.performance.Fn', units='kN')[0],    
+                    prob.get_val(pt+'.performance.Fg', units='kN')[0], 
+                    prob.get_val(pt+'.inlet.F_ram', units='kN')[0], 
+                    prob.get_val(pt+'.performance.OPR')[0],
+                    prob.get_val(pt+'.performance.TSFC', units='kg/kN/h')[0], 
+                    prob.get_val(pt+'.splitter.BPR')[0])
 
     print(file=file, flush=True)
     print(file=file, flush=True)
@@ -293,36 +312,39 @@ def viewer(prob, pt, file=sys.stdout):
     print("                              POINT:", pt, file=file, flush=True)
     print("----------------------------------------------------------------------------", file=file, flush=True)
     print("                       PERFORMANCE CHARACTERISTICS", file=file, flush=True)
-    print("    Mach      Alt       W      Fn      Fg    Fram     OPR     TSFC      BPR ", file=file, flush=True)
+    print("    Mach       Alt       W      Fn      Fg    Fram     OPR     TSFC      BPR ", file=file, flush=True)
+    print("    [-]        [m]     [kg/s]  [kN]    [kN]   Fram     [-]   [kg/(kN h)] [-] ", file=file, flush=True)
     print(" %7.5f  %7.1f %7.3f %7.1f %7.1f %7.1f %7.3f  %7.5f  %7.3f" %summary_data, file=file, flush=True)
 
 
-    fs_names = ['fc.Fl_O', 'inlet.Fl_O', 'fan.Fl_O', 'splitter.Fl_O1', 'splitter.Fl_O2',
-                'duct4.Fl_O', 'lpc.Fl_O', 'duct6.Fl_O', 'hpc.Fl_O', 'bld3.Fl_O', 'burner.Fl_O',
-                'hpt.Fl_O', 'duct11.Fl_O', 'lpt.Fl_O', 'duct13.Fl_O', 'core_nozz.Fl_O', 'byp_bld.Fl_O',
-                'duct15.Fl_O', 'byp_nozz.Fl_O']
+    fs_names = ['flight_cond.Fl_O', 'inlet.Fl_O', 'fan.Fl_O', 'splitter.Fl_O1', 'splitter.Fl_O2',
+                'duct_lpc_inlet.Fl_O', 'lp_compressor.Fl_O', 'duct_hpc_inlet.Fl_O', 
+                'hp_compressor.Fl_O', 'bleed_hpc_exit.Fl_O', 'burner.Fl_O',
+                'hp_turbine.Fl_O', 'duct_lpt_inlet.Fl_O', 'lp_turbine.Fl_O', 
+                'duct_core_outlet.Fl_O', 'core_nozzle.Fl_O', 
+                'duct_bp.Fl_O', 'bypass_nozzle.Fl_O']
     fs_full_names = [f'{pt}.{fs}' for fs in fs_names]
     pyc.print_flow_station(prob, fs_full_names, file=file)
 
-    comp_names = ['fan', 'lpc', 'hpc']
+    comp_names = ['fan', 'lp_compressor', 'hp_compressor']
     comp_full_names = [f'{pt}.{c}' for c in comp_names]
     pyc.print_compressor(prob, comp_full_names, file=file)
 
     pyc.print_burner(prob, [f'{pt}.burner'], file=file)
 
-    turb_names = ['hpt', 'lpt']
+    turb_names = ['hp_turbine', 'lp_turbine']
     turb_full_names = [f'{pt}.{t}' for t in turb_names]
     pyc.print_turbine(prob, turb_full_names, file=file)
 
-    noz_names = ['core_nozz', 'byp_nozz']
+    noz_names = ['core_nozzle', 'bypass_nozzle']
     noz_full_names = [f'{pt}.{n}' for n in noz_names]
     pyc.print_nozzle(prob, noz_full_names, file=file)
 
-    shaft_names = ['hp_shaft', 'lp_shaft']
+    shaft_names = ['hp_shaft', 'lp_shaft', 'fan_shaft']
     shaft_full_names = [f'{pt}.{s}' for s in shaft_names]
     pyc.print_shaft(prob, shaft_full_names, file=file)
 
-    bleed_names = ['hpc', 'bld3', 'byp_bld']
+    bleed_names = ['hp_compressor', 'bleed_hpc_exit']
     bleed_full_names = [f'{pt}.{b}' for b in bleed_names]
     pyc.print_bleed(prob, bleed_full_names, file=file)
 
@@ -401,14 +423,15 @@ def main():
     prob.set_val('DESIGN.flight_cond.MN', 0.8)
     
     # Compressor/Turbine initial guesses
-    prob.set_val('DESIGN.fan.PR', 1.37)     # Weiß nicht ob Sinnvoll
-
+    #prob.set_val('DESIGN.fan.PR', 1.329)     # Weiß nicht ob Sinnvoll
+    
     prob.set_val('DESIGN.fan.eff', 0.9)
-    prob.set_val('DESIGN.geometry.core_nozz_exit',0.37809, units='m**2') # Requirement for Engine Matching
-    prob.set_val('DESIGN.geometry.byp_nozz_exit', 2.41186, units='m**2') # Requirement for Engine Matching
+    # prob.set_val('DESIGN.geometry.core_nozz_exit',0.37809, units='m**2') # Requirement for Engine Matching
+    # prob.set_val('DESIGN.geometry.byp_nozz_exit', 2.41186, units='m**2') # Requirement for Engine Matching
 
     prob.set_val('DESIGN.lp_compressor.PR', 2.586) # IP Compressor
     prob.set_val('DESIGN.lp_compressor.eff', 0.88) # IP Compressor
+    prob.set_val('DESIGN.splitter.BPR', 15)
 
     prob.set_val('DESIGN.hp_compressor.PR', 15)    # HP Compressor
     prob.set_val('DESIGN.hp_compressor.eff', 0.85) # HP Compressor
@@ -424,15 +447,17 @@ def main():
     # Balance RHS (targets)
     #prob.set_val('DESIGN.Fn_REQUIREMENT', 27 * 224.80894387096 , units='lbf') # kN zu lbf ist * 224.80894387096
     prob.set_val('DESIGN.T4_REQUIREMENT', 1700 * 9/5 , units='degR') # K zu Rankine ist * 9/5
-    prob.set_val('DESIGN.OPR_REQUIREMENT', 50.0)  # Overall Pressure Ratio target
     
+    prob.set_val('DESIGN.BYPASS_AREA_REQ', 2.41186, units='m**2')
+    #prob.set_val('DESIGN.CORE_AREA_REQ',0.37809, units='m**2')
     prob.set_val('DESIGN.vr_id_REQUIREMENT', 0.8, units=None)
 
     # Initial guesses for balance states
     prob['DESIGN.balance.W'] = 100.0
-    prob['DESIGN.balance.FAR'] = 0.025
-    prob['DESIGN.balance.fan_PR'] = 1.3
-    prob['DESIGN.balance.lpc_PR'] = 3.0
+    #prob['DESIGN.balance.BPR'] = 15
+    #prob['DESIGN.balance.FAR'] = 0.025
+    #prob['DESIGN.balance.fan_PR'] = 1.3
+    #prob['DESIGN.balance.lpc_PR'] = 3.0
 
     prob['DESIGN.balance.lpt_PR'] = 4.0
     prob['DESIGN.balance.hpt_PR'] = 3.0
@@ -444,19 +469,22 @@ def main():
     # ========== Print Results ==========
     print("\n" + "="*70)
     print("BASELINE ENGINE DESIGN POINT RESULTS")
-    print("6069.8 lbf="*70)
-    print(f"Inlet mass flow rate (W):     {prob['balance.W'][0]:8.2f} lbm/s")
-    print(f"Fuel-air ratio (FAR):         {prob['balance.FAR'][0]:.6f}")
-    print(f"LPC pressure ratio:           {prob['balance.lpc_PR'][0]:.3f}")
-    print(f"LPT pressure ratio:           {prob['balance.lpt_PR'][0]:.3f}")
-    print(f"HPT pressure ratio:           {prob['balance.hpt_PR'][0]:.3f}")
-    print(f"\nNet thrust (Fn):              {prob['performance.Fn'][0]:8.1f} lbf")
-    print(f"Overall Pressure Ratio (OPR): {prob['opr_comp.OPR'][0]:8.2f}")
-    print(f"Burner exit temp (T4):        {prob['burner.Fl_O:tot:T'][0]:8.1f} degR")
-    print(f"\nLP shaft net power:           {prob['lp_shaft.pwr_net'][0]:10.1f} hp")
-    print(f"HP shaft net power:           {prob['hp_shaft.pwr_net'][0]:10.1f} hp")
     print("="*70)
-    
+    print(f"Inlet mass flow rate (W):     {prob['DESIGN.balance.W'][0]:8.2f} lbm/s")
+    print(f"Fuel-air ratio (FAR):         {prob['DESIGN.balance.FAR'][0]:.6f}")
+    #print(f"LPC pressure ratio:           {prob['DESIGN.balance.lpc_PR'][0]:.3f}")
+    print(f"LPT pressure ratio:           {prob['DESIGN.balance.lpt_PR'][0]:.3f}")
+    print(f"HPT pressure ratio:           {prob['DESIGN.balance.hpt_PR'][0]:.3f}")
+    print(f"\nNet thrust (Fn):              {prob['DESIGN.performance.Fn'][0]:8.1f} lbf")
+    #print(f"Overall Pressure Ratio (OPR): {prob['opr_comp.OPR'][0]:8.2f}")
+    print(f"Burner exit temp (T4):        {prob['DESIGN.burner.Fl_O:tot:T'][0]:8.1f} degR")
+    print(f"\nLP shaft net power:           {prob['DESIGN.lp_shaft.pwr_net'][0]:10.1f} hp")
+    print(f"HP shaft net power:           {prob['DESIGN.hp_shaft.pwr_net'][0]:10.1f} hp")
+    print("="*70)
+    with open("baseline_output_vrid08.txt", "w") as file:
+
+        viewer(prob, 'DESIGN', file)
+
     return prob
 
 if __name__ == '__main__':
