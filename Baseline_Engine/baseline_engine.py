@@ -145,12 +145,12 @@ class baseline_engine(pyc.Cycle):
 
             # ========================================================================
             # Forcing the ideal jet velocity ratio of v_id = 0.8 by adjusting fan pressure ratio
-            balance.add_balance('fan_PR', units = None, eq_units = None,
-                                lower=1.001, upper=3, 
-                                res_ref=1e4, val=1.5)
-            self.connect('balance.fan_PR', ['fan.PR', 'opr_comp.F_PR'])
-            self.connect('ideal_jet_velocity_ratio.vr_id', 'balance.lhs:fan_PR')
-            self.promotes('balance', inputs=[('rhs:fan_PR', 'vr_id_REQUIREMENT')])
+            # balance.add_balance('fan_PR', units = None, eq_units = None,
+            #                     lower=1.001, upper=3, 
+            #                     res_ref=1e4, val=1.5)
+            # self.connect('balance.fan_PR', ['fan.PR', 'opr_comp.F_PR'])
+            # self.connect('ideal_jet_velocity_ratio.vr_id', 'balance.lhs:fan_PR')
+            # self.promotes('balance', inputs=[('rhs:fan_PR', 'vr_id_REQUIREMENT')])
 
             # Forcing overall pressure ratio = 50 by adjusting lpc pressure ratio (hpc PR = 15 & fan PR balanced by ) 
             # balance.add_balance('lpc_PR', units=None, eq_units= None)
@@ -176,6 +176,19 @@ class baseline_engine(pyc.Cycle):
                                 val=5)
             self.connect('balance.hpt_PR','hp_turbine.PR')
             self.connect('hp_shaft.pwr_net', 'balance.lhs:hpt_PR')
+
+            # balance.add_balance('fan_PR', eq_units='hp',
+            #                     rhs_val=0., res_ref=1e4,
+            #                     lower=1.001, upper=3, 
+            #                     val = 1.5)
+            # self.connect('balance.fan_PR', 'fan.PR')
+            # self.connect('fan_shaft.pwr_net', 'balance.lhs:fan_PR')
+
+            balance.add_balance('gearbox_trq', val=23928.0, 
+                                units='ft*lbf', eq_units='hp', 
+                                rhs_val=0., res_ref=1e4)
+            self.connect('balance.gearbox_trq', 'fan_gearbox.trq_base')
+            self.connect('fan_shaft.pwr_net', 'balance.lhs:gearbox_trq')
             # ==================================================
             
             # ==================================================
@@ -450,7 +463,7 @@ def main():
     
     prob.set_val('DESIGN.BYPASS_AREA_REQ', 2.41186, units='m**2')
     #prob.set_val('DESIGN.CORE_AREA_REQ',0.37809, units='m**2')
-    prob.set_val('DESIGN.vr_id_REQUIREMENT', 0.8, units=None)
+    #prob.set_val('DESIGN.vr_id_REQUIREMENT', 0.8, units=None)
 
     # Initial guesses for balance states
     prob['DESIGN.balance.W'] = 100.0
