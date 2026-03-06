@@ -429,6 +429,11 @@ def main():
     prob.model = MPbaseline_engine()
     prob.setup()
 
+    # Adding Recorders to visualize convergence
+    recorder = om.SqliteRecorder('cases.sql')
+    prob.model.nonlinear_solver.add_recorder(recorder)
+
+
     # ========== Set Design Point Parameters ==========
     # Flight conditions
     prob.set_val('DESIGN.flight_cond.alt', 35000., units='ft')
