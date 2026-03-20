@@ -9,7 +9,7 @@ class Turbojet(pyc.Cycle):
 
     def setup(self):
 
-        USE_TABULAR = True
+        USE_TABULAR = False
 
         if USE_TABULAR: 
             self.options['thermo_method'] = 'TABULAR'
