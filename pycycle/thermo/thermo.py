@@ -249,21 +249,23 @@ class ThermoAdd(om.Group):
 
 
 """Examp"""
-
+# %% 
 import openmdao.api as om
 import numpy as np
 import pycycle.api as pyc
 
 from pycycle.thermo.thermo import Thermo
 from pycycle.thermo.cea.species_data import Properties
-
-composition = {'H': 2.0, 'O': 1, 'N'}
+# %% 
+ #              H_atoms = 2 * 0.8 + 2 * 0.1 = 1.8
+ #              O_atoms = 2 * 0.1 + 1 * 0.1 = 0.3
+composition = {'H': 1.8, 'O': 0.3}
 
 thermo_data = pyc.species_data.janaf
-thermo_data
+
 props = Properties(thermo_data, init_elements=composition)
 #b0 = props.b0
-
+# %% 
 p = om.Problem()
 ivc = p.model.add_subsystem('ivc', om.IndepVarComp(), promotes=['*'])
 ivc.add_output('T', val= 1073.0, units='degK')
@@ -278,3 +280,4 @@ p.setup(force_alloc_complex=True)
 p.run_model()
 
 p
+# %%

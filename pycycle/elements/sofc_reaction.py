@@ -15,8 +15,8 @@ class VoltageCalc(om.ExplicitComponent):
     V_cell = E_nernst - eta_ASR 
     """
     def setup(self):
-        self.add_input('U_Nernst', val=, units='V', desc=)
-        self.add_input('eta_asr', val=, units='V', desc=)
+        self.add_input('U_Nernst', val=, units='V', desc='')
+        self.add_input('eta_asr', val=, units='V', desc='')
         #self.add_input('i', val=1, units='A/m**2', desc=)
         
         self.add_output('V_cell', val=1.23, units='V', desc='Voltage')
