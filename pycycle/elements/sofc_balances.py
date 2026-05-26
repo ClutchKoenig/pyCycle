@@ -1,6 +1,6 @@
 import numpy as np
 
-import openmdao as om
+import openmdao.api as om
 from pycycle.element_base import Element
 from pycycle.thermo.thermo import ThermoAdd
 
@@ -102,3 +102,158 @@ class ICEnergyBalance(om.ImplicitComponent):
         for key in ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 'Q_dot_loss', 
                     'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right']:
             J['IC_residuum', key] = J['T_cell', key]
+
+
+class heat_convection_electrode(om.ExplicitComponent):
+    """
+    Class capable of handling:
+        - Anode or Cathode heat convection.
+        - Heat convection to Anode or Cathode.
+
+    Outputs Q_conv_PEN [W], Q_conv_IC [W], directly inputs to the Energy balances
+    PENEnergyBalance(), ICEnergyBalance()
+
+    Options 
+    -------
+    electrode       : 'anode'   | 'cathode'
+    type            : 'PEN'     | 'IC'  
+    """
+    def initialize(self):
+        self.options.declare('electrode', values=['anode', 'cathode'])
+        self.options.declare('type', values=['PEN', 'IC'])
+
+    def setup(self):
+        self.add_input('T_fuel_in', units='K')
+        self.add_input('T_fuel_out',units='K')
+        self.add_input('Nu',        units=None, desc = 'Nusselt Number for selected electrode')
+        self.add_input('x_fuel_out',units=None, 'mole fraction for PEN')
+        self.add_input('d_hyd',     units='m')
+
+class thermal_conductivity(om.ExplicitComponent):
+    """
+    Calculates the thermal conductivity lambda for a mixture with the 
+    Mason-Saxena coefficents F12/F21 using the Wassilijewa rule
+    
+    lambda_mix = (x_H2 * lambda_H2) / (x_H2 + x_H2O * F12)
+                +(x_H2O * lambda_H2O) / (x_H2O + x_H2 * F21) 
+    Pure components are fitted linearly by lambda_H2 = a_H2 * T + b_H2
+
+    F12 and F21 require dynamic viscosities which are fitted using a 
+    4th-order polymomial
+    """
+    def initialize(self):
+        self.options.declare('mixture', values=['air', 'H2/H2O'])
+
+    def setup(self):
+        self.add_input('T', units='K')
+        
+        self.add_input('x1', units=None,
+                       desc='component 1 of mixture (O2/H2)')
+        self.add_input('x2', units=None,
+                       desc='component 2 of mixture (N2/H2O)')
+        self.add_output('lambda_mix', units='W/m/K', 
+                        desc='Thermal conductivity of declared mixture')
+        self.declare_partials('lambda_mix', ['T', 'x1', 'x2'])
+
+
+    def compute(self, inputs, outputs):
+        mixture = self.options['mixture']
+        if mixture == 'air':
+            lambda_coeff1 = [a, b]
+            eta_coeff1    = [A,B,C,D,E]
+            lambda_coeff2 = [a, b]
+            eta_coeff2    = [A,B,C,D,E]
+            M_1 = 31.99880 # g/mol O2
+            M_2 = 28.014    # g/mol N2
+
+        elif mixture =='H2/H2O':
+            lambda_coeff1 = [a, b]
+            eta_coeff1   = [A,B,C,D,E]
+            lambda_coeff2 = [a, b]
+            eta_coeff2   = [A,B,C,D,E]
+            M_1 = 2.016     # g/mol H2
+            M_2 = 18.015    # g/mol H2O
+        else: 
+            raise ValueError("mixture must be 'air' or 'H2/H2O', but '{}' was given.".format(mixture))
+
+        T = inputs['T']
+        x1 = inputs['x1']
+        x2 = inputs['x2']
+
+        lambda_1 =  a1 * T + b1
+        lambda_2 = a2 * T + b2
+
+        eta_1 = A1 + B1*T + C1* T**2 + D1 * T**3 + E1 * T**4
+        eta_2 = A2 + B2*T + C2* T**2 + D2 * T**3 + E2 * T**4
+
+        F12 = (1 + np.sqrt(eta_1/eta_2) * (M_2/M_1)**(1/4) )**2 / np.sqrt(8 * (1 + M_1 / M_2))
+        F21 = (1 + np.sqrt(eta_2/eta_1) * (M_1/M_2)**(1/4) )**2 / np.sqrt(8 * (1 + M_2 / M_1))
+        
+        outputs['lambda_mix'] = (x1 * lambda_1) / (x1 + x2 * F12) + (x2 * lambda_2) / (x2 + x1 * F21)
+    
+    def compute_partials(self, inputs, J):
+        mixture = self.options['mixture']
+        if mixture == 'air':
+            # TODO: find coefficents in literature
+            lambda_coeff1 = [a, b]
+            eta_coeff1    = [A,B,C,D,E]
+            lambda_coeff2 = [a, b]
+            eta_coeff2    = [A,B,C,D,E]
+            M_1 = 31.99880 # g/mol O2
+            M_2 = 28.014    # g/mol N2
+
+        elif mixture =='H2/H2O':
+            # TODO: find coefficents in literature
+            lambda_coeff1 = [a, b]
+            eta_coeff1   = [A,B,C,D,E]
+            lambda_coeff2 = [a, b]
+            eta_coeff2   = [A,B,C,D,E]
+            M_1 = 2.016     # g/mol H2
+            M_2 = 18.015    # g/mol H2O
+        else: 
+            raise ValueError("mixture must be 'air' or 'H2/H2O', but '{}' was given.".format(mixture))
+
+        T = inputs['T']
+        x1 = inputs['x1']
+        x2 = inputs['x2']
+
+        lambda_1 =  a1 * T + b1 
+        lambda_2 = a2*T + b2
+        eta_1 = A1 + B1*T + C1* T**2 + D1 * T**3 + E1 * T**4
+        eta_2 = A2 + B2*T + C2* T**2 + D2 * T**3 + E2 * T**4
+        F12 = (1 + np.sqrt(eta_1/eta_2) * (M_2/M_1)**(1/4) )**2 / np.sqrt(8 * (1 + M_1 / M_2))
+        F21 = (1 + np.sqrt(eta_2/eta_1) * (M_1/M_2)**(1/4) )**2 / np.sqrt(8 * (1 + M_2 / M_1))
+        F12_denom = np.sqrt(8 * (1 + M_1 / M_2))
+        F21_denom =np.sqrt(8 * (1 + M_2 / M_1))
+
+        Deriv_denom1 = (x1 + x2 * F12)
+        Deriv_denom2 = (x2 + x1 * F21)
+
+        dL_dLam1 = x1 / Deriv_denom1
+        dL_dLam2 = x2 / Deriv_denom2
+        dLam1_dT = a1
+        dLam2_dT = a2
+
+        deta1_dT = B1 + 2*C1 * T + 3*D1 * T**2 + 4*E1* T**3
+        deta2_dT = B2 + 2*C2 * T + 3*D2 * T**2 + 4*E2* T**3
+        
+        dF12_deta1 = 2 * (1 + np.sqrt(eta_1/eta_2) * (M_2/M_1)**(1/4) ) / F12_denom  * (1/ (2 * np.sqrt(eta_1 * eta_2)) * (M_2/M_1)**(1/4))
+        dF12_deta2 = 2 * (1 + np.sqrt(eta_1/eta_2) * (M_2/M_1)**(1/4) ) / F12_denom * (- 1/2 * np.sqrt(eta_1) / np.sqrt(eta_2**3) * (M_2/M_1)**(1/4))
+
+        dF21_deta1 = 2 * (1 + np.sqrt(eta_2/eta_1) * (M_1/M_2)**(1/4) ) / F21_denom * (- 1/2 * np.sqrt(eta_2) / np.sqrt(eta_1**3) * (M_1/M_2)**(1/4))
+        dF21_deta2 = 2 * (1 + np.sqrt(eta_2/eta_1) * (M_1/M_2)**(1/4) ) / F21_denom * (1/ (2 * np.sqrt(eta_2 * eta_1)) * (M_1/M_2)**(1/4))
+
+        dF12_dT = (dF12_deta1 * deta1_dT
+                   + dF12_deta2 * deta2_dT)
+        
+        dF21_dT = (dF21_deta1 * deta1_dT
+                   + dF21_deta2 * deta2_dT)
+        dL_dF12 = -x1*x2*lambda_1 / Deriv_denom1**2
+        dL_dF21 = - x1*x2*lambda_2 / Deriv_denom2**2
+
+        J['lambda_mix', 'T'] = (dL_dLam1 * dLam1_dT
+                                + dL_dLam2 * dLam2_dT
+                                + dL_dF12 * dF12_dT
+                                + dL_dF21 * dF21_dT) 
+        J['lambda_mix', 'x1']= lambda_1 / (Deriv_denom1) - x1*lambda_1*1 /(Deriv_denom1)**2 - x2*lambda_2*F21 / Deriv_denom2**2
+        J['lambda_mix', 'x2']= lambda_2 / (Deriv_denom2) - x2*lambda_2*1 /(Deriv_denom2)**2 - x1*lambda_1*F12 / Deriv_denom1**2
