@@ -230,17 +230,46 @@ self.connect('anode_rxn.Wout',                'anode_mass.W')
 
 ---
 
-## 8. Nernst Potential
+## 8. NernstThermo — Electrochemical Potentials from CEA
 
-Can be assembled from pyCycle data but requires a custom `ExplicitComponent`:
+`NernstThermo` (`sofc_reaction.py`) replaces the old `NernstPotential` polynomial fit.
+It uses `Properties.H0(T)` and `Properties.S0(T)` directly from janaf — no fitting parameters.
+
+### What it computes
 
 ```
-E = E0(T) + (RT/2F) * ln(p_H2 * p_O2^0.5 / p_H2O)
+H0(T), S0(T)   ← NASA polynomial arrays [dimensionless: H/(RT), S/R] for all H/O species
 
-p_i  = x_i * P                          ← x_i from ChannelMassBalance, P from flow station
-E0   = -ΔG0(T) / (2F)
-ΔG0  = ΔH0(T) - T·ΔS0(T)               ← from Properties.H0(T), Properties.S0(T) (janaf)
+ΔH° = (H0_H2O - H0_H2 - 0.5·H0_O2) · R · T          [J/mol]
+ΔS° = (S0_H2O - S0_H2 - 0.5·S0_O2) · R               [J/mol/K]
+ΔG° = ΔH° - T·ΔS°                                     [J/mol]
+
+V_tn     = -ΔH° / (2F)                                 [V]  thermoneutral voltage
+E_OCV    = -ΔG° / (2F)                                 [V]  standard Nernst
+E_Nernst = E_OCV + (R·T/2F)·ln(x_H2·√(x_O2·P/P_ref) / x_H2O)  [V]
+Qdot_chem = V_tn · I                                   [W]  total reaction enthalpy rate
 ```
 
-pyCycle provides `H0(T)` and `S0(T)` per species via
-`pycycle.thermo.cea.species_data.Properties` — the NASA 7-coefficient polynomials.
+### Cross-electrode note
+
+`x_O2` is **cathode** mole fraction — O₂ never appears in the anode gas after CEA equilibrium.  
+`x_H2`, `x_H2O` come from the anode stream via `ChannelMassBalance`.
+
+### PEN heat from electrochemistry
+
+```
+Qdot_chem − V_cell · I  =  (V_tn − V_cell) · I        [W → PEN]
+```
+
+`V_tn · I` is total enthalpy released; `V_cell · I` leaves as electrical work.
+The remainder heats the PEN. At `V_cell = V_tn` no heat is generated.
+
+### Partials
+
+`declare_partials('*', '*', method='cs')` — NASA polynomial evaluation is CS-safe;
+`H0_applyJ` / `S0_applyJ` exist for analytic dH/dT if needed later.
+
+### Old NernstPotential is superseded
+
+`NernstPotential` (quadratic ΔG fit via `GR_ecr_a/b/c`) is fully replaced.
+`VoltageCalc` and `AreaSpecificResistanceOverpotential` remain valid as separate components.

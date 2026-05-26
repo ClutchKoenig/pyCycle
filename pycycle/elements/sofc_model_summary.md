@@ -123,19 +123,19 @@ at the cathode, H₂ is consumed at the anode, H₂O is produced, and electrical
 ### Key electrochemical equations
 
 ```
-E_OCV  = E0 - (R·T)/(2F) · ln( a_H2O / (a_H2 · a_O2^0.5) )   [Nernst potential]
+V_tn    = −ΔH°(T) / (2F)                                         [thermoneutral voltage]
+E_OCV   = −ΔG°(T) / (2F)                                         [standard Nernst voltage]
+E_Nernst= E_OCV + (R·T/2F)·ln( x_H2·√(x_O2·P/P_ref) / x_H2O ) [concentration correction]
 
-V_cell = E_OCV - η_ohmic - η_activation - η_concentration        [operating voltage]
-
-W_elec = i · V_cell · A                                           [electrical power]
+V_cell  = E_Nernst − η_ASR                                        [operating voltage]
+W_elec  = V_cell · I                                              [electrical power]
 ```
 
 Where:
-- `a_H2`, `a_H2O`, `a_O2` = activities (≈ mole fractions at moderate pressure)
-- `η_ohmic` = `i · R_ohmic(T)` — resistive loss through electrolyte
-- `η_activation` — charge transfer kinetics (Butler-Volmer)
-- `η_concentration` — mass transport limitations at high current
-- `i` = current density [A/m²], `A` = active area [m²], `F` = Faraday constant
+- `ΔH°`, `ΔG°` are computed from NASA polynomials via `Properties.H0(T)` and `S0(T)` — no polynomial fit
+- `x_H2`, `x_H2O` = anode mole fractions;  `x_O2` = **cathode** mole fraction (cross-electrode Nernst)
+- `η_ASR` = `ASR(T) · i` — area-specific resistance overpotential (Arrhenius model)
+- `i` = current density [A/m²], `F` = Faraday constant
 
 ### Composition change along x (species balance per infinitesimal segment dx)
 
@@ -222,49 +222,63 @@ Axial heat conduction through the solid (PEN + IC) links all three zones:
 ### Component responsibilities
 
 ```
-FuelInletProps       ExplicitComponent   H_fuel_in, a_H2, a_H2O from T_in, P, composition
-AirInletProps        ExplicitComponent   H_air_in, a_O2 from T_in, P, composition
-NernstPotential      ExplicitComponent   E_OCV = f(T, a_H2, a_H2O, a_O2)
-Overpotentials       ExplicitComponent   η_ohmic, η_act, η_conc = f(T, i)
-CellVoltage          ExplicitComponent   V_cell = E_OCV - Σ η
-ElectricalPower      ExplicitComponent   W_elec = i · V_cell · A
-MassBalance          ExplicitComponent   ndot_out = f(ndot_in, I)  [I=0 for passive]
-FuelOutletProps      ExplicitComponent   H_fuel_out(T_out, composition_out)
-AirOutletProps       ExplicitComponent   H_air_out(T_out, composition_out)
-EnergyBalance        BalanceComp         solve T_out s.t. energy is conserved
+SOFCThermoAdd              ExplicitComponent   composition_out, Wout from I and inlet b0/W
+                                               (Faraday's law, element-basis update)
+heat_convection_electrode  ExplicitComponent   Q_conv_ = α·A·(T_channel_out - T_struc_out)
+                                               α = Nu·λ/d_hyd; options: electrode, structure
+                                               T_bulk output for thermal_conductivity()
+thermal_conductivity       ExplicitComponent   λ_mix(T_bulk, composition)
+NernstThermo               ExplicitComponent   E_OCV, E_Nernst, V_tn, Qdot_chem
+                                               uses NASA polynomials (Properties.H0/S0) — no fit
+                                               x_O2 comes from cathode, x_H2/x_H2O from anode
+AreaSpecificResistance     ExplicitComponent   ASR(T), eta_asr = ASR·i
+VoltageCalc                ExplicitComponent   V_cell = E_Nernst - eta_asr
+ChannelEnergyBalance       ImplicitComponent   solves T_channel_out
+                                               residual: h_out·W_out - h_in·W_in
+                                                       - Q_conv_PEN - Q_conv_IC - Q_loss = 0
+PENEnergyBalance           ImplicitComponent   solves T_cell
+                                               residual includes Q_conv_PEN (anode+cathode),
+                                               Qdot_chem, -V_cell·I, axial conduction
+ICEnergyBalance            ImplicitComponent   solves T_IC
 ```
 
-### Energy balance closure (BalanceComp)
-
-The `BalanceComp` drives `T_out` until:
+### Channel energy balance — full term list
 
 ```
-H_fuel_in + H_air_in = H_fuel_out(T_out) + H_air_out(T_out) + W_elec + Q_loss
+0 = (h_in·W_in − h_out·W_out)  ← advective enthalpy flux
+  + Q_conv_PEN                  ← convection from PEN to channel
+  + Q_conv_IC                   ← convection from IC to channel
+  + Q_loss                      ← heat loss to environment (= 0 in passive model)
 ```
 
-```python
-bal = self.add_subsystem('bal', om.BalanceComp())
-bal.add_balance('T_out',
-    val=1000.0,
-    units='K',
-    eq_units='W',
-    use_mult=False)
+`T_channel_out` is the implicit state; `Thermo(mode='total_TP')` evaluates `h_out` at each Newton iteration.  
+`Q_loss` and radiation are wired to zero for the passive model but declared as inputs for extensibility.
 
-self.connect('energy_in.H_net',    'bal.lhs:T_out')   # H_in - W_elec - Q_loss
-self.connect('enthalpy_out.H',     'bal.rhs:T_out')   # H_out(T_out)
+### PEN energy balance — active zone term list
+
 ```
+0 = Q_conv_PEN_an              ← convection from anode channel
+  + Q_conv_PEN_cat             ← convection from cathode channel
+  + Qdot_chem                  ← total reaction enthalpy rate = V_tn · I
+  − V_cell · I                 ← electrical power extracted
+  + Qdot_conduct_left          ← axial conduction from left segment
+  + Qdot_conduct_right         ← axial conduction from right segment
+  + Q_loss                     ← environment losses (= 0 passive)
+```
+
+Net electrochemical heat deposited in PEN: `(V_tn − V_cell) · I`
 
 ### Component type decision guide
 
 | Situation | Type |
 |---|---|
-| Compute Nernst potential from inputs | `ExplicitComponent` |
-| Compute mole fractions / activities | `ExplicitComponent` |
+| Compute Nernst potential, V_tn, Qdot_chem | `ExplicitComponent` |
+| Compute convective heat transfer | `ExplicitComponent` |
+| Compute composition update (Faraday) | `ExplicitComponent` |
 | Compute overpotentials from i, T | `ExplicitComponent` |
-| CEA equilibrium solve (Gibbs min.) | `ImplicitComponent` |
-| Close energy balance → solve T_out | `BalanceComp` |
-| Close mass balance → solve FAR or flow | `BalanceComp` |
-| Coupled multi-state electrochemical solve | `ImplicitComponent` |
+| CEA equilibrium solve (Gibbs min.) | `ImplicitComponent` (inside Thermo) |
+| Close channel energy balance → solve T_channel_out | `ImplicitComponent` |
+| Close PEN/IC energy balance → solve T_cell/T_IC | `ImplicitComponent` |
 
 ### Passive vs Active component reuse
 
