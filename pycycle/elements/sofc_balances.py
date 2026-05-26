@@ -103,11 +103,29 @@ class ICEnergyBalance(om.ImplicitComponent):
                     'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right']:
             J['IC_residuum', key] = J['T_cell', key]
 
+class heat_convection_channel(om.ExplicitComponent):
+    """
+    Class responsible for calculating the convective heat transfer 
+    inside the Anode or Cathode flow channels. I.e. handles:
+        - Anode or Cathode heat convection.
+
+    Outputs Q_conv_anode [W] or Q_conv_cathode [W]
+
+    Options
+    -------
+    electrode       : 'anode' | 'cathode'
+    """
+    def initialize(self):
+        self.options.declare('electrode', values=['anode', 'cathode'])
+    def setup(self):
+        self.add_input('W_channel', units='kg/s')
+        self.add_input('')
+
 
 class heat_convection_electrode(om.ExplicitComponent):
     """
     Class capable of handling:
-        - Anode or Cathode heat convection.
+        
         - Heat convection to Anode or Cathode.
 
     Outputs Q_conv_PEN [W], Q_conv_IC [W], directly inputs to the Energy balances
@@ -116,18 +134,74 @@ class heat_convection_electrode(om.ExplicitComponent):
     Options 
     -------
     electrode       : 'anode'   | 'cathode'
-    type            : 'PEN'     | 'IC'  
+    structure       : 'PEN'     | 'IC'  
     """
     def initialize(self):
         self.options.declare('electrode', values=['anode', 'cathode'])
-        self.options.declare('type', values=['PEN', 'IC'])
+        self.options.declare('structure', values=['PEN', 'IC'])
 
     def setup(self):
-        self.add_input('T_fuel_in', units='K')
-        self.add_input('T_fuel_out',units='K')
-        self.add_input('Nu',        units=None, desc = 'Nusselt Number for selected electrode')
-        self.add_input('x_fuel_out',units=None, 'mole fraction for PEN')
-        self.add_input('d_hyd',     units='m')
+        self.add_input('T_channel_in',  units='K')
+        self.add_input('T_channel_out', units='K',      desc='Outlet temperature of channel mixture - result of Implicit calculation in EnergyBalance()')
+        self.add_input('T_struc_out',   units='K',      desc='Outlet temperature of either PEN or IC')
+
+        self.add_input('Nu',            units=None,     desc = 'Nusselt Number for selected electrode')
+        self.add_input('d_hyd',         units='m',      desc='characteristic length Channel')
+        self.add_input('A',             units='m**2',   desc='Area between PEN and channel')
+        self.add_input('lambda',        units='W/m/K',  desc='Thermal conductivity of channel mixture - obtained by thermal_conductivity()')
+        self.add_input('A_ic_side',     units='m**2',   desc='Area between IC and channel')
+        # TODO: look into the MR_an_aus switch
+
+        self.add_output('Q_conv_',      units='W',      desc='Convective Heat transfer from selected structure to electrode flow channel')
+
+        self.add_output('T_bulk',   units='K',          desc='Bulk mixture temperature. Needed for thermal_conductivity()')
+        self.declare_partials('Q_conv_', ['T_channel_out', 'T_struc_out' ,'Nu', 'lambda', 'd_hyd', 'A', 'A_ic_side' ]) # T_fuel partial is =0 : left undeclared
+        self.declare_partials('T_bulk', 'T_channel_in', val = 0.5)
+        self.declare_partials('T_bulk', 'T_channel_out', val=0.5)
+
+    def compute(self, inputs, outputs):
+        electrode = self.options['electrode']
+        structure = self.options['structure']
+               
+        T_bulk = (inputs['T_channel_in'] + inputs['T_channel_out']) / 2
+        outputs['T_bulk'] = T_bulk
+        alpha =  inputs['Nu'] * inputs['lambda'] / inputs['d_hyd']
+        dT = inputs['T_channel_out'] - inputs['T_struc_out']
+
+        if structure == 'PEN':
+            Q_conv_ = alpha * inputs['A'] * dT
+
+        elif structure == 'IC':
+            Q_conv_ = alpha * (inputs['A'] + inputs['A_ic_side']) * dT
+
+        outputs['Q_conv_'] = Q_conv_
+
+    def compute_partials(self, inputs, J):
+        structure = self.options['structure']
+
+        alpha =  inputs['Nu'] * inputs['lambda'] / inputs['d_hyd']
+        dT = inputs['T_channel_out'] - inputs['T_struc_out']
+
+        if structure == 'PEN':
+            J['Q_conv_', 'T_channel_out']   = alpha * inputs['A'] 
+            J['Q_conv_', 'T_struc_out']     = -alpha * inputs['A'] 
+            J['Q_conv_', 'Nu']              = inputs['lambda'] / inputs['d_hyd'] * inputs['A'] * dT
+            J['Q_conv_', 'd_hyd']           = - inputs['Nu'] * inputs['lambda'] / inputs['d_hyd']**2 * inputs['A'] * dT
+            J['Q_conv_', 'A']               = alpha * dT
+            J['Q_conv_', 'A_ic_side']       = 0
+            J['Q_conv_',  'lambda']          = inputs['Nu'] / inputs['d_hyd'] * inputs['A'] * dT 
+
+        elif structure == 'IC':
+            A_combined = inputs['A'] + inputs['A_ic_side']
+            J['Q_conv_', 'T_channel_out']   = alpha * (A_combined)
+            J['Q_conv_', 'T_struc_out']     = -alpha * (A_combined)
+            J['Q_conv_', 'Nu']              = inputs['lambda'] / inputs['d_hyd'] * (A_combined) * dT
+            J['Q_conv_', 'd_hyd']           = - inputs['Nu'] * inputs['lambda'] / inputs['d_hyd']**2 * (A_combined) * dT
+            J['Q_conv_', 'A']               = alpha * dT
+            J['Q_conv_', 'A_ic_side']       = alpha * dT
+            J['Q_conv_', 'lambda']          = inputs['Nu'] / inputs['d_hyd'] * A_combined * dT
+
+
 
 class thermal_conductivity(om.ExplicitComponent):
     """
@@ -145,7 +219,7 @@ class thermal_conductivity(om.ExplicitComponent):
         self.options.declare('mixture', values=['air', 'H2/H2O'])
 
     def setup(self):
-        self.add_input('T', units='K')
+        self.add_input('T', units='K', desc='bulk mixture temperature - obtained from heat')
         
         self.add_input('x1', units=None,
                        desc='component 1 of mixture (O2/H2)')
