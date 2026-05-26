@@ -2,11 +2,85 @@ import numpy as np
 import openmdao.api as om
 from pycycle.element_base import Element
 from pycycle.thermo.thermo import Thermo, ThermoAdd
+from pycycle.thermo.cea.species_data import Properties, janaf
 
 from pycycle.flow_in import FlowIn
 
-RM = 8.3145                    # J/ (mol K)
-FARADAY =  96485.3321233100184 # C/mol = As/mol
+RM = 8.3145                    # J/(mol·K)
+FARADAY = 96485.3321233100184  # C/mol = As/mol
+P_REF   = 101325.0             # Pa  (1 atm reference pressure for Nernst)
+
+
+class NernstThermo(om.ExplicitComponent):
+    """
+    Computes Nernst voltage, thermoneutral voltage, and PEN reaction heat
+    using NASA polynomial data from pyCycle's CEA thermo — no polynomial fit.
+
+    Reaction:  H2 + 0.5 O2 → H2O,  n_e = 2
+
+    E_OCV   = -ΔG°(T) / (2F)                              [V]
+    E_Nernst= E_OCV + (R·T/2F)·ln(x_H2·√(x_O2·P/P_ref) / x_H2O)  [V]
+    V_tn    = -ΔH°(T) / (2F)                              [V]
+    Qdot_chem = V_tn · I                                   [W]  (total reaction enthalpy rate)
+
+    The net heat deposited in the PEN is: Qdot_chem - V_cell·I = (V_tn - V_cell)·I
+
+    Options
+    -------
+    spec : janaf-style thermo data module (default: janaf)
+    """
+
+    def initialize(self):
+        self.options.declare('spec', default=janaf, recordable=False)
+
+    def setup(self):
+        # Build a Properties object that covers H and O elements so that
+        # H2, O2, and H2O are all present in the products list.
+        props = Properties(self.options['spec'], init_elements={'H': 2, 'O': 1})
+        self._props    = props
+        self._idx_H2   = props.products.index('H2')
+        self._idx_O2   = props.products.index('O2')
+        self._idx_H2O  = props.products.index('H2O')
+
+        self.add_input('T',      val=1000., units='K',   desc='Reaction temperature (T_cell)')
+        self.add_input('V_cell', val=0.7,   units='V',   desc='Actual cell voltage')
+        self.add_input('I',      val=0.0,   units='A',   desc='Total current')
+        self.add_input('x_H2',   val=0.5,   units=None,  desc='H2 mole fraction at anode TPB')
+        self.add_input('x_H2O',  val=0.5,   units=None,  desc='H2O mole fraction at anode TPB')
+        self.add_input('x_O2',   val=0.21,  units=None,  desc='O2 mole fraction at cathode TPB')
+        self.add_input('P',      val=101325., units='Pa', desc='Operating pressure')
+
+        self.add_output('E_OCV',     val=1.0,  units='V', desc='Standard Nernst voltage -ΔG°/(2F)')
+        self.add_output('E_Nernst',  val=1.0,  units='V', desc='Nernst voltage with concentration correction')
+        self.add_output('V_tn',      val=1.25, units='V', desc='Thermoneutral voltage -ΔH°/(2F)')
+        self.add_output('Qdot_chem', val=0.0,  units='W', desc='Total reaction enthalpy rate V_tn·I')
+
+        self.declare_partials('*', '*', method='cs')
+
+    def compute(self, inputs, outputs):
+        T      = inputs['T']
+        V_cell = inputs['V_cell']
+        I      = inputs['I']
+        x_H2   = inputs['x_H2']
+        x_H2O  = inputs['x_H2O']
+        x_O2   = inputs['x_O2']
+        P      = inputs['P']
+
+        H0 = self._props.H0(T)   # dimensionless H_j / (R·T), shape (num_prod,)
+        S0 = self._props.S0(T)   # dimensionless S_j / R,     shape (num_prod,)
+
+        # ΔH°(T) and ΔS°(T) for H2 + 0.5 O2 → H2O  [J/mol]
+        dH0 = H0[self._idx_H2O] - H0[self._idx_H2] - 0.5 * H0[self._idx_O2]
+        dS0 = S0[self._idx_H2O] - S0[self._idx_H2] - 0.5 * S0[self._idx_O2]
+
+        dH = dH0 * RM * T          # J/mol  (H0 = H/(R·T)  →  H = H0·R·T)
+        dG = dH - T * dS0 * RM     # J/mol  (G = H - T·S,  S = S0·R)
+
+        outputs['V_tn']      = -dH / (2.0 * FARADAY)
+        outputs['E_OCV']     = -dG / (2.0 * FARADAY)
+        outputs['E_Nernst']  = outputs['E_OCV'] + (RM * T / (2.0 * FARADAY)) * np.log(
+                                    x_H2 * np.sqrt(x_O2 * P / P_REF) / x_H2O)
+        outputs['Qdot_chem'] = outputs['V_tn'] * I
 
 class VoltageCalc(om.ExplicitComponent):
     """
@@ -32,7 +106,7 @@ class VoltageCalc(om.ExplicitComponent):
         eta = inputs['eta_asr']
 
         J['V_cell', 'U_Nernst'] = 1
-        J['V_cell', 'eta_asr'] = 1
+        J['V_cell', 'eta_asr'] = -1
 
 
 class AreaSpecificResistanceOverpotential(om.ExplicitComponent):
