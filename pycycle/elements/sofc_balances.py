@@ -118,9 +118,20 @@ class heat_convection_channel(om.ExplicitComponent):
     def initialize(self):
         self.options.declare('electrode', values=['anode', 'cathode'])
     def setup(self):
-        self.add_input('W_channel', units='kg/s')
-        self.add_input('')
+        self.add_input('W_channel', units='kg/s',   desc= 'Mass flow of channel')
+        self.add_input('h_in',      units='J/kg/K', )
+        self.add_input('h_out',     units='J/kg/K')
 
+        self.add_output('Q_conv_ch', units='W')
+        self.declare_partials('Q_conv_ch', ['W_channel', 'h_in', 'h_out'])
+    def compute(self, inputs, outputs):
+        outputs['Q_conv_ch'] = inputs['W_channel'] * (inputs['h_out'] - inputs['h_in'])
+
+    def compute_partials(self, inputs, J): 
+        J['Q_conv_ch', 'W_channel'] = (inputs['h_out'] - inputs['h_in'])
+        J['Q_conv_ch', 'h_in']      = -inputs['W_channel']
+        J['Q_conv_ch', 'h_out']      = inputs['W_channel']
+        
 
 class heat_convection_electrode(om.ExplicitComponent):
     """
