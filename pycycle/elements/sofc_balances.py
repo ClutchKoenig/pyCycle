@@ -26,15 +26,15 @@ class PENEnergyBalance(om.ImplicitComponent):
         self.add_input('N_cell', val=1.0,  units=None,  desc='Number of cells')
 
         self.add_output('T_cell',        val=1001.9, units='K', desc='PEN temperature')
-        self.add_output('PEN_residuum',  val=0.0,   units='W', desc='Energy balance residual')
+        #self.add_output('PEN_residuum',  val=0.0,   units='W', desc='Energy balance residual')
 
         self.declare_partials('T_cell', ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 'Qdot_chem',
                                          'Qdot_conduct_PEN_left', 'Qdot_conduct_PEN_right',
                                          'I', 'V_cell', 'N_cell'])
         self.declare_partials('T_cell', 'T_cell', val=0.0)
-        self.declare_partials('PEN_residuum', ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 'Qdot_chem',
-                                               'Qdot_conduct_PEN_left', 'Qdot_conduct_PEN_right',
-                                               'I', 'V_cell', 'N_cell'])
+        # self.declare_partials('PEN_residuum', ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 'Qdot_chem',
+        #                                        'Qdot_conduct_PEN_left', 'Qdot_conduct_PEN_right',
+        #                                        'I', 'V_cell', 'N_cell'])
 
     def apply_nonlinear(self, inputs, outputs, residuals):
         P_elec = inputs['I'] * inputs['V_cell'] * inputs['N_cell']
@@ -46,7 +46,7 @@ class PENEnergyBalance(om.ImplicitComponent):
                           inputs['Qdot_conduct_PEN_right'])
 
         residuals['T_cell'] = energy_balance
-        outputs['PEN_residuum'] = energy_balance
+        #outputs['PEN_residuum'] = energy_balance
 
     def linearize(self, inputs, outputs, J):
         J['T_cell', 'Qdot_conv_PEN_an']      = 1.0
@@ -58,10 +58,10 @@ class PENEnergyBalance(om.ImplicitComponent):
         J['T_cell', 'V_cell']                = -inputs['I'] * inputs['N_cell']
         J['T_cell', 'N_cell']                = -inputs['I'] * inputs['V_cell']
 
-        # PEN_residuum shares the same derivatives
-        for key in ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 'Qdot_chem',
-                    'Qdot_conduct_PEN_left', 'Qdot_conduct_PEN_right', 'I', 'V_cell', 'N_cell']:
-            J['PEN_residuum', key] = J['T_cell', key]
+        # # PEN_residuum shares the same derivatives
+        # for key in ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 'Qdot_chem',
+        #             'Qdot_conduct_PEN_left', 'Qdot_conduct_PEN_right', 'I', 'V_cell', 'N_cell']:
+        #     J['PEN_residuum', key] = J['T_cell', key]
 
 
 
@@ -102,6 +102,75 @@ class ICEnergyBalance(om.ImplicitComponent):
         for key in ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 'Q_dot_loss', 
                     'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right']:
             J['IC_residuum', key] = J['T_cell', key]
+class ChannelEnergyBalance(om.ImplicitComponent):
+    """
+    Steady-state energy balance for the anode or cathode flow channel.
+
+    Residual:
+        R = Q_conv_channel - Q_conv_PEN - Q_conv_IC [- Q_loss] = 0
+
+    where Q_conv_channel = ṁ·(h_out - h_in)  is supplied by heat_convection_channel,
+    and Q_conv_PEN / Q_conv_IC are the wall-to-gas convective heat fluxes.
+
+    T_channel is the implicit state.  It does not appear directly in R — the
+    sensitivity dR/dT_channel = ṁ·cp is seen by the group-level Newton solver
+    through the connected Thermo and heat_convection_channel components.
+
+    Options
+    -------
+    electrode : 'anode' | 'cathode'
+    loss      : bool    if True, a heat-loss term Q_loss must be connected
+    """
+
+    def initialize(self):
+        self.options.declare('electrode', values=['anode', 'cathode'])
+        self.options.declare('loss', default=False, desc='Include external heat loss term')
+
+    def setup(self):
+        self.add_input('Q_conv_channel', val=0.0, units='W',
+                       desc='Enthalpy flux absorbed by channel gas: ṁ·(h_out - h_in)')
+        self.add_input('Q_conv_PEN',     val=0.0, units='W',
+                       desc='Convective heat from PEN wall to channel gas')
+        self.add_input('Q_conv_IC',      val=0.0, units='W',
+                       desc='Convective heat from IC wall to channel gas')
+
+        if self.options['loss']:
+            self.add_input('Q_loss',     val=0.0, units='W',
+                           desc='External heat loss from channel')
+
+        self.add_output('T_channel', val=1000.0, units='K',
+                        desc='Channel outlet temperature (implicit state)')
+
+        active_inputs = ['Q_conv_channel', 'Q_conv_PEN', 'Q_conv_IC']
+        if self.options['loss']:
+            active_inputs.append('Q_loss')
+
+        self.declare_partials('T_channel', active_inputs)
+        self.declare_partials('T_channel', 'T_channel', val=0.0)
+
+    def apply_nonlinear(self, inputs, outputs, residuals):
+        R = (inputs['Q_conv_channel']
+             - inputs['Q_conv_PEN']
+             - inputs['Q_conv_IC'])
+
+        if self.options['loss']:
+            R -= inputs['Q_loss']
+
+        residuals['T_channel'] = R
+
+    def linearize(self, inputs, outputs, J):
+        J['T_channel', 'Q_conv_channel'] =  1.0
+        J['T_channel', 'Q_conv_PEN']     = -1.0
+        J['T_channel', 'Q_conv_IC']      = -1.0
+        J['T_channel', 'T_channel']      =  0.0  # sensitivity via group Newton only
+
+        if self.options['loss']:
+            J['T_channel', 'Q_loss']     = -1.0
+    def linearize(self, inputs, outputs, J):        
+        J['T_channel', 'Q_conv_channel'] = 1
+        J['T_channel', 'Q_conv_PEN'] = -1
+        J['T_channel', 'Q_conv_IC'] = -1
+        J['T_channel', 'T_channel'] = 0
 
 class heat_convection_channel(om.ExplicitComponent):
     """
@@ -392,3 +461,149 @@ class ChannelMassBalance(om.ExplicitComponent):
     def compute_partials(self, inputs, J):
         J['x_i', 'n_i'] = 1.0 / inputs['n_moles'] * np.ones(self._n)
         J['x_i', 'n_moles'] = - inputs['n_i'] / inputs['n_moles']**2
+
+class heat_conduction_struct(om.ExplicitComponent):
+    """
+    Lateral heat conduction (along flow direction) through the PEN or IC
+    structure between two adjacent segments.
+
+    Fourier (PEN, single cross-section):
+        Q = lambda * (h_cell * delta) * n_cell * (N_seg / l_cell) * dT
+
+    Fourier (IC, two cross-sections in series per Simulink):
+        R1 = (l_cell/N_seg) / (lambda * h_cell * delta * n_cell)
+        R2 = (l_cell/N_seg) / (lambda * width_IC * delta_ch * n_cell * N_IC_walls)
+        Q  = dT / (R1 + R2)
+
+    Sign convention (consistent with energy balance):
+        Q_cond_struc_right = +Q   (heat entering the right-neighbour segment)
+        Q_cond_struc_left  = -Q   (heat entering the left-neighbour segment)
+        with dT = T_cell_left - T_cell_right
+
+    Options
+    -------
+    structure  : 'PEN' | 'IC'
+    N_segments : int   number of discretisation segments (default 10)
+    """
+    # TODO: check if partials are setup correctly!!!!
+    def initialize(self):
+        self.options.declare('structure', values=['PEN', 'IC'])
+        self.options.declare('N_segments', default=10, desc='Number of discretisation segments')
+
+    def setup(self):
+        struct = self.options['structure']
+
+        self.add_input('T_cell_left',      val=1000.0, units='K',     desc='Temperature of left-neighbour segment')
+        self.add_input('T_cell_right',     val=1000.0, units='K',     desc='Temperature of right-neighbour segment')
+        self.add_input('length_cell',      val=0.1,    units='m',     desc='Total active cell length')
+        self.add_input('height_cell',      val=0.1,    units='m',     desc='Cell height (conduction cross-section)')
+        self.add_input('thickness_struct', val=2e-4,   units='m',     desc='Thickness of PEN or IC layer')
+        self.add_input('lambda_struct',    val=2.0,    units='W/m/K', desc='Thermal conductivity of PEN or IC')
+        self.add_input('n_cell',           val=1.0,    units=None,    desc='Number of cells in stack')
+
+        if struct == 'IC':
+            self.add_input('width_IC',    val=1e-3, units='m',  desc='IC channel width')
+            self.add_input('thickness_ch',val=1e-3, units='m',  desc='Channel height (IC side-wall area)')
+            self.add_input('N_IC_walls',  val=2.0,  units=None, desc='Number of IC side-wall faces per channel')
+
+        self.add_output('Q_cond_struc_right', val=0.0, units='W', desc='Heat flux into right-neighbour segment')
+        self.add_output('Q_cond_struc_left',  val=0.0, units='W', desc='Heat flux into left-neighbour segment')
+
+        common = ['T_cell_left', 'T_cell_right', 'length_cell', 'height_cell',
+                  'thickness_struct', 'lambda_struct', 'n_cell']
+        active = common + (['width_IC', 'thickness_ch', 'N_IC_walls'] if struct == 'IC' else [])
+
+        self.declare_partials('Q_cond_struc_right', active)
+        self.declare_partials('Q_cond_struc_left',  active)
+
+    def compute(self, inputs, outputs):
+        struct     = self.options['structure']
+        N          = self.options['N_segments']
+        dT         = inputs['T_cell_left'] - inputs['T_cell_right']
+        l_cell     = inputs['length_cell']
+        h_cell     = inputs['height_cell']
+        delta      = inputs['thickness_struct']
+        lambda_str = inputs['lambda_struct']
+        n_cell     = inputs['n_cell']
+        dx         = l_cell / N  # segment length
+
+        if struct == 'PEN':
+            A = h_cell * delta
+            Q = lambda_str * A * n_cell / dx * dT
+        else:
+            width_IC  = inputs['width_IC']
+            delta_ch  = inputs['thickness_ch']
+            n_walls   = inputs['N_IC_walls']
+            A1 = h_cell * delta
+            A2 = width_IC * delta_ch
+            R1 = dx / (lambda_str * A1 * n_cell)
+            R2 = dx / (lambda_str * A2 * n_cell * n_walls)
+            Q  = dT / (R1 + R2)
+
+        outputs['Q_cond_struc_right'] =  Q
+        outputs['Q_cond_struc_left']  = -Q
+
+    def compute_partials(self, inputs, J):
+        struct     = self.options['structure']
+        N          = self.options['N_segments']
+        dT         = inputs['T_cell_left'] - inputs['T_cell_right']
+        l_cell     = inputs['length_cell']
+        h_cell     = inputs['height_cell']
+        delta      = inputs['thickness_struct']
+        lambda_str = inputs['lambda_struct']
+        n_cell     = inputs['n_cell']
+        dx         = l_cell / N
+
+        if struct == 'PEN':
+            A = h_cell * delta
+            G = lambda_str * A * n_cell / dx   # Q = G * dT
+
+            dQ_dTleft  =  G
+            dQ_dTright = -G
+            dQ_dh      = lambda_str * delta  * n_cell / dx * dT
+            dQ_ddelta  = lambda_str * h_cell * n_cell / dx * dT
+            dQ_dlambda = A * n_cell / dx * dT
+            dQ_dn      = lambda_str * A / dx * dT
+            dQ_dl      = -lambda_str * A * n_cell * N / l_cell**2 * dT  # dx=l/N → G~N/l
+
+        else:
+            width_IC  = inputs['width_IC']
+            delta_ch  = inputs['thickness_ch']
+            n_walls   = inputs['N_IC_walls']
+
+            A1      = h_cell * delta
+            A2      = width_IC * delta_ch
+            R1      = dx / (lambda_str * A1 * n_cell)
+            R2      = dx / (lambda_str * A2 * n_cell * n_walls)
+            R_total = R1 + R2
+            Q       = dT / R_total
+
+            dQ_dTleft  =  1.0 / R_total
+            dQ_dTright = -1.0 / R_total
+
+            # ∂Q/∂R_total = -Q / R_total
+            dQ_dR = -Q / R_total
+
+            # ∂R/∂param using R1 = dx/(lambda*A1*n), so ∂R1/∂x = -R1/x for any multiplicative x
+            dQ_dh      = dQ_dR * (-R1 / h_cell)
+            dQ_ddelta  = dQ_dR * (-R1 / delta)
+            dQ_dlambda = dQ_dR * (-(R1 + R2) / lambda_str)
+            dQ_dn      = dQ_dR * (-(R1 + R2) / n_cell)
+            dQ_dl      = dQ_dR * ( (R1 + R2) / l_cell)  # dx=l/N → R~l → ∂R/∂l = R/l
+            dQ_dwidth  = dQ_dR * (-R2 / width_IC)
+            dQ_dch     = dQ_dR * (-R2 / delta_ch)
+            dQ_dnwalls = dQ_dR * (-R2 / n_walls)
+
+        # Q_right = +Q → same sign; Q_left = -Q → flipped sign
+        for out, sign in [('Q_cond_struc_right', 1.0), ('Q_cond_struc_left', -1.0)]:
+            J[out, 'T_cell_left']      = sign * dQ_dTleft
+            J[out, 'T_cell_right']     = sign * dQ_dTright
+            J[out, 'height_cell']      = sign * dQ_dh
+            J[out, 'thickness_struct'] = sign * dQ_ddelta
+            J[out, 'lambda_struct']    = sign * dQ_dlambda
+            J[out, 'n_cell']           = sign * dQ_dn
+            J[out, 'length_cell']      = sign * dQ_dl
+            if struct == 'IC':
+                J[out, 'width_IC']     = sign * dQ_dwidth
+                J[out, 'thickness_ch'] = sign * dQ_dch
+                J[out, 'N_IC_walls']   = sign * dQ_dnwalls
