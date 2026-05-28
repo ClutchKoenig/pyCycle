@@ -461,15 +461,20 @@ class HeatConduction(om.Group):
     Organizes the heat conduction of the IC and PEN in Flow direction of the Channels. 
     """
     def initialize(self):
-        self.options.declare('N_seg', default=10)
+        self.options.declare('N_segments', default=10)
 
     def setup(self):
-        N_segments = self.options['N_seg']
+        N_segments = self.options['N_segments']
         self.add_subsystem('IC_Conduction', HeatConductionStructure(structure='IC', N_segments=N_segments), 
-                           promotes_outputs=[('Q_cond_struc_right','Q_cond_right_IC'), ('Q_cond_struc_left', 'Q_cond_left_IC') ])
+                           promotes_inputs=[('T_cell_left', 'T_IC_left'), 
+                                            ('T_cell_right', 'T_IC_right'),
+                                            ('','')], #TODO: get all geometric parameters promoted to this level and higher!!
+                           promotes_outputs=[('Q_cond_struc_right','Q_cond_right_IC'), 
+                                             ('Q_cond_struc_left', 'Q_cond_left_IC') ])
         self.add_subsystem('PEN_Conduction', HeatConductionStructure(structure='PEN', N_segments=N_segments), 
+                           promotes_inputs=[()]
                            promotes_outputs=[('Q_cond_struc_right','Q_cond_right_PEN'), ('Q_cond_struc_left', 'Q_cond_left_PEN') ])
-        
+                            #TODO: get all geometric parameters promoted to this level and higher!!
         self.add_subsystem('Q_conduc_left', om.ExecComp('Qc_left = Q_cond_left_IC + Q_cond_left_PEN',
                                                         Q_cond_left_IC= {'val':-1000, 'units':'W'},
                                                         Q_cond_left_PEN= {'val':-1000, 'units': 'W'},
