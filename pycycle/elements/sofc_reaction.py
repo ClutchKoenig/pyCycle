@@ -382,7 +382,7 @@ class ElectroChemistry(om.Group):
 
         self.add_subsystem('Nernst_Calc', NernstThermo(),
                            promotes_inputs=['I', ('T', 'T_PEN'), ('P', 'P_cat')],
-                           promotes_outputs=[('E_Nernst', 'U_Nernst'), ('E_OCV', 'U_OCV')])
+                           promotes_outputs=[('E_Nernst', 'U_Nernst'), ('E_OCV', 'U_OCV'), 'Qdot_chem'])
         
         self.add_subsystem('voltage', VoltageCalc(),
                            promotes=['*'])
