@@ -607,3 +607,38 @@ class heat_conduction_struct(om.ExplicitComponent):
                 J[out, 'width_IC']     = sign * dQ_dwidth
                 J[out, 'thickness_ch'] = sign * dQ_dch
                 J[out, 'N_IC_walls']   = sign * dQ_dnwalls
+
+
+class HeatConduction(om.Group):
+    """
+    Organizes the heat conduction of the IC and PEN in Flow direction of the Channels. 
+    """
+    def initialize(self):
+        self.options.declare('N_seg', default=10)
+
+    def setup(self):
+        N_segments = self.options['N_seg']
+        self.add_subsystem('IC_Conduction', heat_conduction_struct(structure='IC', N_segments=N_segments), 
+                           promotes_outputs=[('Q_cond_struc_right','Q_cond_right_IC'), ('Q_cond_struc_left', 'Q_cond_left_IC') ])
+        self.add_subsystem('PEN_Conduction', heat_conduction_struct(structure='PEN', N_segments=N_segments), 
+                           promotes_outputs=[('Q_cond_struc_right','Q_cond_right_PEN'), ('Q_cond_struc_left', 'Q_cond_left_PEN') ])
+        
+        self.add_subsystem('Q_conduc_left', om.ExecComp('Qc_left = Q_cond_left_IC + Q_cond_left_PEN',
+                                                        Q_cond_left_IC= {'val':-1000, 'units':'W'},
+                                                        Q_cond_left_PEN= {'val':-1000, 'units': 'W'},
+                                                        Qc_left = {'val': -2000, 'units': 'W'}),
+                                                        promotes_outputs=['Qc_left'])
+        self.add_subsystem('Q_conduc_right', om.ExecComp('Qc_right = Q_cond_right_IC + Q_cond_right_PEN',
+                                                        Q_cond_right_IC= {'val':1000, 'units':'W'},
+                                                        Q_cond_right_PEN= {'val':1000, 'units': 'W'},
+                                                        Qc_right = {'val': 2000, 'units': 'W'}),
+                                                        promotes_outputs=['Qc_right'])
+        
+        self.connect('Q_cond_left_IC',  'Q_conduc_left.Q_cond_left_IC')
+        self.connect('Q_cond_right_IC', 'Q_conduc_right.Q_cond_right_IC')
+
+        self.connect('Q_cond_left_PEN',  'Q_conduc_left.Q_cond_left_PEN')
+        self.connect('Q_cond_right_PEN', 'Q_conduc_right.Q_cond_right_PEN')
+
+        self.linear_solver = om.LinearRunOnce()
+
