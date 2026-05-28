@@ -102,6 +102,7 @@ class ICEnergyBalance(om.ImplicitComponent):
         for key in ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 'Q_dot_loss', 
                     'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right']:
             J['IC_residuum', key] = J['T_cell', key]
+
 class ChannelEnergyBalance(om.ImplicitComponent):
     """
     Steady-state energy balance for the anode or cathode flow channel.
@@ -172,7 +173,7 @@ class ChannelEnergyBalance(om.ImplicitComponent):
         J['T_channel', 'Q_conv_IC'] = -1
         J['T_channel', 'T_channel'] = 0
 
-class heat_convection_channel(om.ExplicitComponent):
+class HeatConvectionChannel(om.ExplicitComponent):
     """
     Class responsible for calculating the convective heat transfer 
     inside the Anode or Cathode flow channels. I.e. handles:
@@ -202,7 +203,7 @@ class heat_convection_channel(om.ExplicitComponent):
         J['Q_conv_ch', 'h_out']      = inputs['W_channel']
         
 
-class heat_convection_electrode(om.ExplicitComponent):
+class HeatConvectionElectrode(om.ExplicitComponent):
     """
     Class capable of handling:
         
@@ -283,7 +284,7 @@ class heat_convection_electrode(om.ExplicitComponent):
 
 
 
-class thermal_conductivity(om.ExplicitComponent):
+class ThermalConductivityMixture(om.ExplicitComponent):
     """
     Calculates the thermal conductivity lambda for a mixture with the 
     Mason-Saxena coefficents F12/F21 using the Wassilijewa rule
@@ -462,7 +463,7 @@ class ChannelMassBalance(om.ExplicitComponent):
         J['x_i', 'n_i'] = 1.0 / inputs['n_moles'] * np.ones(self._n)
         J['x_i', 'n_moles'] = - inputs['n_i'] / inputs['n_moles']**2
 
-class heat_conduction_struct(om.ExplicitComponent):
+class HeatConductionStructure(om.ExplicitComponent):
     """
     Lateral heat conduction (along flow direction) through the PEN or IC
     structure between two adjacent segments.
@@ -618,9 +619,9 @@ class HeatConduction(om.Group):
 
     def setup(self):
         N_segments = self.options['N_seg']
-        self.add_subsystem('IC_Conduction', heat_conduction_struct(structure='IC', N_segments=N_segments), 
+        self.add_subsystem('IC_Conduction', HeatConductionStructure(structure='IC', N_segments=N_segments), 
                            promotes_outputs=[('Q_cond_struc_right','Q_cond_right_IC'), ('Q_cond_struc_left', 'Q_cond_left_IC') ])
-        self.add_subsystem('PEN_Conduction', heat_conduction_struct(structure='PEN', N_segments=N_segments), 
+        self.add_subsystem('PEN_Conduction', HeatConductionStructure(structure='PEN', N_segments=N_segments), 
                            promotes_outputs=[('Q_cond_struc_right','Q_cond_right_PEN'), ('Q_cond_struc_left', 'Q_cond_left_PEN') ])
         
         self.add_subsystem('Q_conduc_left', om.ExecComp('Qc_left = Q_cond_left_IC + Q_cond_left_PEN',
