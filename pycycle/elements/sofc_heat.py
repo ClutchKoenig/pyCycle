@@ -308,54 +308,6 @@ class ThermalConductivityMixture(om.ExplicitComponent):
         J['lambda_mix', 'x2']= lambda_2 / (Deriv_denom2) - x2*lambda_2*1 /(Deriv_denom2)**2 - x1*lambda_1*F12 / Deriv_denom1**2
 
 
-class ChannelMassBalance(om.ExplicitComponent):
-    """
-    This class is not really a mass balance. The consistency of molar flows is guaranteed by construction.
-    A sanity check will be implemented:
-
-        sanity: total system mass in = total mass out
-        assert np.isclose(W_an_in + W_cat_in, W_an_out + W_cat_out, rtol=1e-8)
-
-    This class rather takes inputs from anode_out/cathode_out.base_thermo.n and computes the molar fractions xi for
-    each species of the gas channel.
-
-    Outputs should connect to the 
-    """
-    def initialize(self):
-        self.options.declare('thermo', desc='thermodynamic data object', recordable=False)
-        self.options.declare('spec', default=janaf, recordable=False)
-        self.options.declare('electrode', values=['anode', 'cathode'])
-
-        self.options.declare('composition', desc='Element mole-ratio dict for the inlet flow')
-    def setup(self):
-        thermo = self.options['thermo']
-        spec = self.options['spec']
-
-        self._n = thermo.num_prod
-        num_elem = thermo.num_element
-        products = thermo.products
-
-        idx = np.arange(self._n)
-
-        self.add_input('n_i', val= np.ones(self._n), units=None, 
-                       desc= 'array containing all n [mol/g] for all possible species ' \
-                       'given the channel elemental composition.') # ChemEq doesnt have units declared for the moles :/
-        self.add_input('n_moles', val= 1e-2, units=None, desc='Total molar flow')
-
-        self.add_output('x_i', val=np.ones(self._n), units=None,
-                        desc='array containing all mole fractions')
-        self.declare_partials('x_i', 'n_i',     rows=idx, cols=idx)
-        self.declare_partials('x_i', 'n_moles')
-        
-    def compute(self, inputs, outputs):
-        n_i = inputs['n_i']
-        n = inputs['n_moles']
-        x_i = n_i / n
-        outputs['x_i'] = x_i
-    
-    def compute_partials(self, inputs, J):
-        J['x_i', 'n_i'] = 1.0 / inputs['n_moles'] * np.ones(self._n)
-        J['x_i', 'n_moles'] = - inputs['n_i'] / inputs['n_moles']**2
 
 class HeatConductionStructure(om.ExplicitComponent):
     """
