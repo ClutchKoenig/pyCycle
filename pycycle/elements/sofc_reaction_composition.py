@@ -1,4 +1,5 @@
 """
+DEPRECATED!!! Not used at all. NEW FILE: sofc_thermo_add.py
 ReactionComposition: Update flow composition after electrochemical reaction.
 
 Handles:
