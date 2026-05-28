@@ -27,7 +27,7 @@ class PENEnergyBalance(om.ImplicitComponent):
         
         self.add_input('N_cell', val=1.0,  units=None,  desc='Number of cells')
 
-        self.add_output('T_cell',        val=1001.9, units='K', desc='PEN temperature')
+        self.add_output('T_PEN', val=1001.9, units='K', desc='PEN temperature')
         #self.add_output('PEN_residuum',  val=0.0,   units='W', desc='Energy balance residual')
         passive_inputs = ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 
                         'Qdot_conduct_PEN_left', 'Qdot_conduct_PEN_right']
@@ -39,10 +39,10 @@ class PENEnergyBalance(om.ImplicitComponent):
             self.add_input('I',        val=1.0, units='A', desc='Current')
             self.add_input('V_cell',   val=0.7, units='V', desc='Cell voltage')
             active_inputs = ['Qdot_chem', 'I', 'V_cell', 'N_cell']
-            self.declare_partials('T_cell', active_inputs)
+            self.declare_partials('T_PEN', active_inputs)
 
-        self.declare_partials('T_cell', passive_inputs)
-        self.declare_partials('T_cell', 'T_cell', val=0.0)
+        self.declare_partials('T_PEN', passive_inputs)
+        self.declare_partials('T_PEN', 'T_PEN', val=0.0)
         # self.declare_partials('PEN_residuum', ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 'Qdot_chem',
         #                                        'Qdot_conduct_PEN_left', 'Qdot_conduct_PEN_right',
         #                                        'I', 'V_cell', 'N_cell'])
@@ -64,23 +64,23 @@ class PENEnergyBalance(om.ImplicitComponent):
             Q_chem = 0
 
         energy_balance = ( Q_conv_cat + Q_conv_an - Q_chem - P_elec + Q_cond_left +Q_cond_right)
-        residuals['T_cell'] = energy_balance
+        residuals['T_PEN'] = energy_balance
 
         #outputs['PEN_residuum'] = energy_balance
 
     def linearize(self, inputs, outputs, J):
         seg_type = self.options['seg_type']
 
-        J['T_cell', 'Qdot_conv_PEN_an']       = 1.0
-        J['T_cell', 'Qdot_conv_PEN_cat']      = 1.0
-        J['T_cell', 'Qdot_conduct_PEN_left']  = 1.0
-        J['T_cell', 'Qdot_conduct_PEN_right'] = 1.0
+        J['T_PEN', 'Qdot_conv_PEN_an']       = 1.0
+        J['T_PEN', 'Qdot_conv_PEN_cat']      = 1.0
+        J['T_PEN', 'Qdot_conduct_PEN_left']  = 1.0
+        J['T_PEN', 'Qdot_conduct_PEN_right'] = 1.0
 
         if seg_type == 'active':
-            J['T_cell', 'N_cell']    = -inputs['I'] * inputs['V_cell']
-            J['T_cell', 'V_cell']    = -inputs['I'] * inputs['N_cell']
-            J['T_cell', 'I']         = -inputs['V_cell'] * inputs['N_cell']
-            J['T_cell', 'Qdot_chem'] = -1.0
+            J['T_PEN', 'N_cell']    = -inputs['I'] * inputs['V_cell']
+            J['T_PEN', 'V_cell']    = -inputs['I'] * inputs['N_cell']
+            J['T_PEN', 'I']         = -inputs['V_cell'] * inputs['N_cell']
+            J['T_PEN', 'Qdot_chem'] = -1.0
 
         # # PEN_residuum shares the same derivatives
         # for key in ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 'Qdot_chem',
@@ -109,11 +109,11 @@ class ICEnergyBalance(om.ImplicitComponent):
         self.add_input('Qdot_conduct_IC_left', val=0, units='W')
         self.add_input('Qdot_conduct_IC_right', val=0, units='W')
 
-        self.add_output('T_cell', val=1000, units='K')
+        self.add_output('T_IC', val=1000, units='K')
         self.add_output('IC_residuum', val=0, units='W')
-        self.declare_partials('T_cell', ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 
+        self.declare_partials('T_IC', ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 
                                          'Q_dot_loss', 'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right'])
-        self.declare_partials('T_cell', 'T_cell', val=0)
+        self.declare_partials('T_IC', 'T_cell', val=0)
         self.declare_partials('IC_residuum', ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 
                                               'Q_dot_loss', 'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right'])
         
@@ -121,19 +121,19 @@ class ICEnergyBalance(om.ImplicitComponent):
         energy_balance = (inputs['Qdot_conv_IC_an'] + inputs['Qdot_conv_IC_cat'] - 
                           inputs['Q_dot_loss'] + 
                           inputs['Qdot_conduct_IC_left'] + inputs['Qdot_conduct_IC_right'] )
-        residuals['T_cell'] = energy_balance
+        residuals['T_IC'] = energy_balance
         outputs['IC_residuum'] = energy_balance
 
     def linearize(self, inputs, outputs, J):
-        J['T_cell', 'Qdot_conv_IC_an'] = 1
-        J['T_cell', 'Qdot_conv_IC_cat'] = 1
-        J['T_cell', 'Q_dot_loss'] = - 1
-        J['T_cell', 'Qdot_conduct_IC_left'] = 1
-        J['T_cell', 'Qdot_conduct_IC_left'] = 1
+        J['T_IC', 'Qdot_conv_IC_an'] = 1
+        J['T_IC', 'Qdot_conv_IC_cat'] = 1
+        J['T_IC', 'Q_dot_loss'] = - 1
+        J['T_IC', 'Qdot_conduct_IC_left'] = 1
+        J['T_IC', 'Qdot_conduct_IC_left'] = 1
         
         for key in ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 'Q_dot_loss', 
                     'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right']:
-            J['IC_residuum', key] = J['T_cell', key]
+            J['IC_residuum', key] = J['T_IC', key]
 
 class ChannelEnergyBalance(om.ImplicitComponent):
     """
