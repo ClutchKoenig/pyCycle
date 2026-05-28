@@ -7,7 +7,7 @@ class HeatConvection(om.Group):
     """
     Group that handles convective heat transfer of all kinds.
     """
-    def initialize(self):
+    #def initialize(self):
         #self.options.declare('N_seg', default=10)
     def setup(self):
         #N_seg = self.options['N_seg']
