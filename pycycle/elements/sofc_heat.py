@@ -3,6 +3,69 @@ import numpy as np
 from pycycle.thermo.thermo import ThermoAdd
 from pycycle.thermo.cea.species_data import Properties, janaf
 
+class HeatConvection(om.Group):
+    """
+    Group that handles convective heat transfer of all kinds.
+    """
+    def initialize(self):
+        #self.options.declare('N_seg', default=10)
+    def setup(self):
+        #N_seg = self.options['N_seg']
+
+        self.add_subsystem('T_bulk', om.ExecComp(['T_bulk_A = (T_A_in + T_A_out) / 2',
+                                                  'T_bulk_C = (T_C_in + T_C_out) / 2'],
+                                                  T_A_in={'units':'K'}, T_C_in={'units':'K'}, T_bulk_A={'units':'K'},
+                                                  T_C_out={'units':'K'}, T_A_out = {'units':'K'}, T_bulk_C={'units':'K'}),
+                                                  promotes=['*'])
+        
+        self.add_subsystem('anode', HeatConvectionChannel(electrode='anode'),
+                           promotes_inputs=[('W_channel', 'W_A'), ('h_in', 'h_A_in'), ('h_out', 'h_A_out')], 
+                           promotes_outputs=[('Q_conv_ch', 'Q_conv_A')])
+        self.add_subsystem('cathode', HeatConvectionChannel(electrode='cathode'),
+                           promotes_inputs=[('W_channel', 'W_C'), ('h_in', 'h_C_in'), ('h_out', 'h_C_out')],  
+                           promotes_outputs=[('Q_conv_ch', 'Q_conv_C')])
+        
+        self.add_subsystem('lambda_anode', ThermalConductivityMixture(mixture='H2/H2O'),
+                           promotes_outputs=[('lambda_mix', 'lambda_A')])
+        self.add_subsystem('lambda_cathode', ThermalConductivityMixture(mixture='air'),
+                           promotes_outputs=[('lambda_mix', 'lambda_C')])
+        
+        
+        self.add_subsystem('PEN_A', HeatConvectionElectrode(electrode='anode', structure='PEN'),
+                           promotes_inputs = [('lambda', 'lambda_A'),
+                                             ('T_channel_in', 'T_A_in'),
+                                             ('T_channel_out', 'T_A_out')],
+                           promotes_outputs =[('Q_conv_', 'Q_conv_PEN_A')]) 
+                                             
+        
+        self.add_subsystem('PEN_C', HeatConvectionElectrode(electrode='cathode', structure='PEN'),
+                           promotes_inputs = [('lambda', 'lambda_C'),
+                                             ('T_channel_in', 'T_C_in'),
+                                             ('T_channel_out', 'T_C_out')],
+                           promotes_outputs=[('Q_conv_', 'Q_conv_PEN_C')])  
+                                             
+        self.add_subsystem('IC_A', HeatConvectionElectrode(electrode='anode', structure='IC'),
+                           promotes_inputs = [('lambda', 'lambda_A'),
+                                             ('T_channel_in', 'T_A_in'),
+                                             ('T_channel_out', 'T_A_out')],
+                           promotes_outputs=[('Q_conv_', 'Q_conv_IC_A')])
+        
+        self.add_subsystem('IC_C', HeatConvectionElectrode(electrode='cathode', structure='IC'),
+                           promotes_inputs = [('lambda', 'lambda_C'),
+                                             ('T_channel_in', 'T_C_in'),
+                                             ('T_channel_out', 'T_C_out')],
+                           promotes_outputs=[('Q_conv_', 'Q_conv_IC_C')])
+
+        # Connect thermodynamic variables: 
+        self.connect('T_bulk_A','lambda_anode.T')
+        self.connect('T_bulk_C','lambda_cathode.T')
+        # Not neccessary since they are already connected by promoted namespace
+        # self.connect('lambda_A', 'PEN_A.lambda')
+        # self.connect('lambda_C', 'PEN_C.lambda')
+        # self.connect('lambda_A', 'IC_A.lambda')
+        # self.connect('lambda_C', 'IC_C.lambda')
+
+
 class HeatConvectionChannel(om.ExplicitComponent):
     """
     Class responsible for calculating the convective heat transfer 
@@ -19,8 +82,8 @@ class HeatConvectionChannel(om.ExplicitComponent):
         self.options.declare('electrode', values=['anode', 'cathode'])
     def setup(self):
         self.add_input('W_channel', units='kg/s',   desc= 'Mass flow of channel')
-        self.add_input('h_in',      units='J/kg/K', )
-        self.add_input('h_out',     units='J/kg/K')
+        self.add_input('h_in',      units='J/kg', )
+        self.add_input('h_out',     units='J/kg')
 
         self.add_output('Q_conv_ch', units='W')
         self.declare_partials('Q_conv_ch', ['W_channel', 'h_in', 'h_out'])
@@ -130,13 +193,14 @@ class ThermalConductivityMixture(om.ExplicitComponent):
         self.options.declare('mixture', values=['air', 'H2/H2O'])
 
     def setup(self):
-        self.add_input('T', units='K', desc='bulk mixture temperature - obtained from heat')
+        self.add_input('T', units='K', val=1000, 
+                       desc='bulk mixture temperature - obtained from heat')
         
-        self.add_input('x1', units=None,
+        self.add_input('x1', units=None, val = 0.5,
                        desc='component 1 of mixture (O2/H2)')
-        self.add_input('x2', units=None,
+        self.add_input('x2', units=None, val = 0.5,
                        desc='component 2 of mixture (N2/H2O)')
-        self.add_output('lambda_mix', units='W/m/K', 
+        self.add_output('lambda_mix', units='W/m/K', val = 0.026,#for air
                         desc='Thermal conductivity of declared mixture')
         self.declare_partials('lambda_mix', ['T', 'x1', 'x2'])
 
