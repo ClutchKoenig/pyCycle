@@ -43,7 +43,6 @@ class NernstThermo(om.ExplicitComponent):
         self._idx_H2O  = props.products.index('H2O')
 
         self.add_input('T',      val=1000., units='K',   desc='Reaction temperature (T_cell)')
-        self.add_input('V_cell', val=0.7,   units='V',   desc='Actual cell voltage')
         self.add_input('I',      val=0.0,   units='A',   desc='Total current')
         self.add_input('x_H2',   val=0.5,   units=None,  desc='H2 mole fraction at anode TPB')
         self.add_input('x_H2O',  val=0.5,   units=None,  desc='H2O mole fraction at anode TPB')
@@ -59,7 +58,6 @@ class NernstThermo(om.ExplicitComponent):
 
     def compute(self, inputs, outputs):
         T      = inputs['T']
-        V_cell = inputs['V_cell']
         I      = inputs['I']
         x_H2   = inputs['x_H2']
         x_H2O  = inputs['x_H2O']
@@ -89,11 +87,11 @@ class VoltageCalc(om.ExplicitComponent):
     V_cell = E_nernst - eta_ASR 
     """
     def setup(self):
-        self.add_input('U_Nernst', val=, units='V', desc='')
-        self.add_input('eta_asr', val=, units='V', desc='')
+        self.add_input('U_Nernst', val=1.23, units='V', desc='Voltage considering concentration of gases')
+        self.add_input('eta_asr', val=0.3, units='V', desc='Overpotential Voltage - Losses due to combined "area specific resistance (ASR)"')
         #self.add_input('i', val=1, units='A/m**2', desc=)
         
-        self.add_output('V_cell', val=1.23, units='V', desc='Voltage')
+        self.add_output('V_cell', val=0.93, units='V', desc='Voltage')
         self.declare_partials('V_cell', ['U_Nernst', 'eta_asr'])
 
     def compute(self, inputs, outputs):
@@ -115,23 +113,23 @@ class AreaSpecificResistanceOverpotential(om.ExplicitComponent):
     eta = ASR * i
     """
     def setup(self):
-        self.add_input('T', val=, units='K', desc=)
-        self.add_input('T_ref_asr', val=, units='K', desc=)
-        self.add_input('E_a_asr', val=, units='V', desc=)
-        self.add_input('R_ref_asr', val=, units='ohm', desc=)
-        self.add_input('R_c_asr', val=, units='ohm', desc=)
-        self.add_input('ASR_nom_750', val=, units='ohm*m**2', desc=)
-        self.add_input('i', val=, units='A/m/m', desc='Current density')
+        self.add_input('T_PEN',     val=1001.9, units='K', desc='Temperature at and in the electrochemical active area')
+        self.add_input('T_ref_asr', val=800,    units='K', desc='Reference Temperature at which Correlation of ASR is calibrated with')
+        self.add_input('E_a_asr',   val=0.2,       units='V', desc='Reference activation energy')
+        self.add_input('R_ref_asr', val=,       units='ohm', desc='Reference asr resistance')
+        self.add_input('R_c_asr',   val=,       units='ohm', desc='Reference asr resistance')
+        self.add_input('ASR_nom_750',val=,      units='ohm*m**2', desc=)
+        self.add_input('i',         val=,       units='A/m/m', desc='Current density')
         # Einheiten inkonsistent? Was hat ASR_nom für ne Einheit?
         # eta_asr = A/ m**2 * ohm * ASR (ohm*m**2?)
         self.add_output('ASR', val=, units='ohm*m**2', desc=)
         self.add_output('eta_asr', val=, units='V', desc='')
 
-        self.declare_partials('ASR', ['T', 'T_ref_asr','E_a_asr' , 'R_ref_asr', 'R_c_asr', 'ASR_nom_750'])
-        self.declare_partials('eta_asr', ['T', 'i', 'T_ref_asr','E_a_asr' , 'R_ref_asr', 'R_c_asr', 'ASR_nom_750'])
+        self.declare_partials('ASR', ['T_PEN', 'T_ref_asr', 'E_a_asr', 'R_ref_asr', 'R_c_asr', 'ASR_nom_750'])
+        self.declare_partials('eta_asr', ['T_PEN', 'i', 'T_ref_asr', 'E_a_asr', 'R_ref_asr', 'R_c_asr', 'ASR_nom_750'])
 
     def compute(self, inputs, outputs):
-        T = inputs['T']
+        T = inputs['T_PEN']
         T_ref = inputs['T_ref_asr']
         E_a = inputs['E_a_asr']
         R_ref = inputs['R_ref_asr']
@@ -145,7 +143,7 @@ class AreaSpecificResistanceOverpotential(om.ExplicitComponent):
         outputs['eta_asr'] = ASR * i
 
     def compute_partials(self, inputs, J):
-        T = inputs['T']
+        T = inputs['T_PEN']
         T_ref = inputs['T_ref_asr']
         E_a = inputs['E_a_asr']
         R_ref = inputs['R_ref_asr']
@@ -154,14 +152,14 @@ class AreaSpecificResistanceOverpotential(om.ExplicitComponent):
         i = inputs['i']
         exp_term = np.exp((1/T - 1/ T_ref) * E_a * FARADAY / RM)
                           
-        J['ASR', 'T'] = (- (1/T**2) * E_a * FARADAY / RM * exp_term * R_ref) * ASR_nom
+        J['ASR', 'T_PEN'] = (- (1/T**2) * E_a * FARADAY / RM * exp_term * R_ref) * ASR_nom
         J['ASR', 'T_ref_asr'] = ( (1/T_ref**2) * E_a * FARADAY / RM  * exp_term * R_ref)* ASR_nom
         J['ASR', 'E_a_asr'] = (1/T - 1/ T_ref) * FARADAY / RM * exp_term * R_ref * ASR_nom
         J['ASR', 'R_ref_asr'] = exp_term * ASR_nom
         J['ASR', 'R_c_asr'] = ASR_nom
         J['ASR', 'ASR_nom_750'] = exp_term * R_ref + R_c
 
-        J['eta_asr', 'T'] =             J['ASR', 'T'] * i
+        J['eta_asr', 'T_PEN'] =             J['ASR', 'T'] * i
         J['eta_asr', 'i'] =             (exp_term * R_ref + R_c) * ASR_nom
         J['eta_asr', 'T_ref_asr'] =     J['ASR', 'T_ref_asr'] * i
         J['eta_asr', 'E_a_asr'] =       J['ASR', 'E_a_asr'] * i
@@ -250,6 +248,7 @@ class NernstPotential(om.ExplicitComponent):
 class SpeciesPartialPressure(om.ExplicitComponent):
     """
     Extract species composition from CEA and calculate partial pressures/activities.
+    Deprecated and not used anymore
     """
     
     def initialize(self):
@@ -318,31 +317,34 @@ class CurrentDensityCalc(Element):
     Output:
         i     : Current density [A/m**2]
     """
+    def initialize(self):
+        self.options.declare('N_seg', default=10)
+
     def setup(self):
-        self.add_input('I', val=, units='', desc=)
-        self.add_input('A', val=, units='', desc=) # promote input
-        self.add_input('N_seg', val=8,units=None)
+        self.add_input('I', val=100,    units='A',      desc='Current in the segment. Only > 0 for active segments')
+        self.add_input('A', val=,       units='m**2',   desc='Cross-sectional area of current flux - perpendicular to FLow direction') # promote input
+
         
-        self.add_output('i', val=, units='',desc=)
-        self.declare_partials('i', ['I','A','N_seg'])
+        self.add_output('i', val=, units='A/m/m',desc='Current density in segment')
+        self.declare_partials('i', ['I','A'])
 
     def compute(self, inputs, outputs):
         I = inputs['I']
         A = inputs['A']
-        N_seg = inputs['N_seg']
+        N_seg = self.options['N_seg']
         outputs['i'] = I / (A / N_seg)
 
     def compute_partials(self, inputs, J):
         I = inputs['I']
         A = inputs['A']
-        N_seg = inputs['N_seg']
+        N_seg = self.options['N_seg']
         J['i', 'I'] = N_seg / A
         J['i', 'A'] = - N_seg * I / (A**2 )
-        J['i', 'N_seg'] = I / A
+        
 
 class segment_calc
 
-class ElectroChemistry(Element):
+class ElectroChemistry(om.Group):
     """
     Assembly that models the electrochemical calculations
     -------------
@@ -366,5 +368,22 @@ class ElectroChemistry(Element):
         ASR
         E_nernst
     """
+    def initialize(self):
+        self.options.declare('N_segments', default=10)
+    def setup(self):
+        N_seg = self.options['N_segments']
+        self.add_subsystem('current_density', CurrentDensityCalc(N_seg=N_seg),
+                           promotes_inputs=['I', 'A'],
+                           promotes_outputs=['i'])
 
+        self.add_subsystem('ASR', AreaSpecificResistanceOverpotential(),
+                           promotes_inputs=['i', 'T_PEN'],
+                           promotes_outputs=['ASR', 'eta_asr'])
 
+        self.add_subsystem('Nernst_Calc', NernstThermo(),
+                           promotes_inputs=['I', ('T', 'T_PEN'), ('P', 'P_cat')],
+                           promotes_outputs=[('E_Nernst', 'U_Nernst'), ('E_OCV', 'U_OCV')])
+        
+        self.add_subsystem('voltage', VoltageCalc(),
+                           promotes=['*'])
+        
