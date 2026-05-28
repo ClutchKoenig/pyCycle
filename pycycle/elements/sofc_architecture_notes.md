@@ -108,6 +108,69 @@ of the outlet element set, so that downstream array sizes can be determined.
 
 ---
 
+## 5. OpenMDAO Component Design Rules
+
+### Options vs Inputs
+
+| Use `options.declare` | Use `add_input` |
+|---|---|
+| Controls `setup()` structure (array sizes, number of subsystems, which equations run) | Used only in `compute()` / `apply_nonlinear()` |
+| `electrode`, `structure`, `mixture` (switches equations) | All geometry: `A`, `d_hyd`, `L`, `thickness_*` |
+| `N_segments` (loop count in `setup`) | All material properties: `lambda`, `k` |
+| `N_cells` when instantiating N cell subsystems | `n_cell` as scalar multiplier (e.g. `P_elec = I·V·n_cell`) |
+| `thermo`, `spec` objects (set array sizes) | Anything you might want to sweep or optimise |
+
+### ImplicitComponent rules
+
+```python
+def apply_nonlinear(self, inputs, outputs, residuals):
+    # ONLY write to residuals — never to outputs
+    # outputs here is the solver's current state guess (read-only)
+    residuals['T'] = inputs['Q_in'] - inputs['Q_out']   # ✓
+    outputs['T']   = ...                                  # ✗ corrupts solver state
+
+def linearize(self, inputs, outputs, J):
+    # outputs IS a parameter here (unlike ExplicitComponent)
+    J['T', 'Q_in']  =  1.0
+    J['T', 'T']     =  0.0   # must declare even when zero
+
+def compute_partials(self, inputs, J):
+    # ExplicitComponent: NO outputs parameter
+    pass
+```
+
+- Always `declare_partials(state, state, val=0.0)` even when the local partial is zero
+- Diagnostic outputs (residual monitors) belong in a **separate ExplicitComponent outside the Newton group** — at convergence the residual is ~0 anyway
+- `ICEnergyBalance` still has the wrong pattern (`outputs['IC_residuum']` in `apply_nonlinear`) — needs fixing
+
+### Newton group structure (per segment)
+
+All ImplicitComponents whose states are coupled **and all ExplicitComponents in the same algebraic loop** must share one Group with a Newton solver:
+
+```
+sofc_segment (Group)
+  nonlinear_solver = NewtonSolver(solve_subsystems=False)
+  linear_solver    = DirectSolver()
+  ├── anode_thermo_out / cathode_thermo_out   (Thermo, total_TP) — T_out→h_out
+  ├── heat_conv_PEN_an/cat, heat_conv_IC_an/cat  (heat_convection_electrode)
+  ├── heat_conv_ch_an/cat                     (heat_convection_channel)
+  ├── PEN_balance                             → state: T_cell
+  ├── IC_balance                              → state: T_IC
+  ├── channel_balance_an                      → state: T_an_out
+  └── channel_balance_cat                     → state: T_cat_out
+
+[outside Newton group]
+  └── ic_residual_monitor  (ExplicitComponent, diagnostic only)
+```
+
+The Thermo components **must** be inside the Newton group because they carry the
+`T_out → h_out` sensitivity (`dh/dT = cp`) that makes the channel balance Jacobian non-zero.
+
+For a full stack: outer `NonlinearBlockGS` sweeps over segment groups; inter-segment
+conduction (`heat_conduction_struct`) carries heat between them.
+
+---
+
 ## 5. SOFCThermoAdd
 
 ### Purpose

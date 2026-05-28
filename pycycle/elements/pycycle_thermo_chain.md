@@ -69,7 +69,7 @@ ThermoCalcs
                              from n, n_moles, T, P via NASA polynomials
 ```
 
-**Outputs (all SI):**
+**Outputs (CGS-based, legacy of NASA CEA):**
 
 | Variable | Units      | Description                        |
 |----------|------------|------------------------------------|
@@ -79,7 +79,19 @@ ThermoCalcs
 | `Cp`     | cal/(g·K)  | Specific heat at constant pressure |
 | `Cv`     | cal/(g·K)  | Specific heat at constant volume   |
 | `rho`    | g/cm³      | Density                            |
-| `R`      | cal/(g·K)  | Specific gas constant              |
+| `R`      | J/(kg·K)   | Specific gas constant (SI oddity)  |
+
+> **Note — LHV vs. HHV:**
+> The JANAF database only contains **gas-phase species**. There is no `H2O(l)` in the
+> species list, so `ChemEq` cannot model condensation. As a result, `h` always reflects
+> the **Lower Heating Value (LHV)** enthalpy of reaction (~−242 kJ/mol for H₂ oxidation),
+> even if `T` is set below the condensation point.
+> The **Higher Heating Value (HHV)** (~−286 kJ/mol) includes an additional ~44 kJ/mol
+> from the condensation of H₂O(g) → H₂O(l), which must be added manually if needed.
+>
+> For SOFC at operating temperatures (600–1000 °C) water is always gaseous, so the CEA
+> result is physically correct. SOFC efficiency is conventionally quoted against **LHV**,
+> which is consistent with what pyCycle returns directly.
 
 ---
 
