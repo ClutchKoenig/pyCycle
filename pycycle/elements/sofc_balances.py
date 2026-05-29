@@ -205,7 +205,7 @@ class ChannelEnergyBalance(om.ImplicitComponent):
         J['T_channel', 'Q_conv_IC'] = -1
         J['T_channel', 'T_channel'] = 0
 
-class ChannelMassBalance(om.ExplicitComponent):
+class SpeciesFlowCalc(om.ExplicitComponent):
     """
     This class is not really a mass balance. The consistency of molar flows is guaranteed by construction.
     A sanity check will be implemented:
@@ -234,15 +234,22 @@ class ChannelMassBalance(om.ExplicitComponent):
 
         idx = np.arange(self._n)
 
-        self.add_input('n_i', val= np.ones(self._n), units=None, 
+        self.add_input('n_i_in', val= np.ones(self._n), units=None, 
                        desc= 'array containing all n [mol/g] for all possible species ' \
-                       'given the channel elemental composition.') # ChemEq doesnt have units declared for the moles :/
-        self.add_input('n_moles', val= 1e-2, units=None, desc='Total molar flow')
+                             'given the channel elemental composition. Comes from base_thermo.n') # ChemEq doesnt have units declared for the moles :/
+        
+        self.add_input('n_moles_in', val= 1e-2, units=None, desc='Total molar flow')
+        self.add_input('n_i_out', np.ones(self._n), units=None)
+        self.add_input('n_moles_out', val=1e-2, units=None)
 
-        self.add_output('x_i', val=np.ones(self._n), units=None,
+        self.add_output('x_i_in', val=np.ones(self._n), units=None,
                         desc='array containing all mole fractions')
-        self.declare_partials('x_i', 'n_i',     rows=idx, cols=idx)
-        self.declare_partials('x_i', 'n_moles')
+        self.add_output('x_i')
+        self.declare_partials('x_i_in', 'n_i_in',     rows=idx, cols=idx)
+        self.declare_partials('x_i_in', 'n_moles_in')
+        
+        self.declare_partials('x_i_out', 'n_i_out',     rows=idx, cols=idx)
+        self.declare_partials('x_i_out', 'n_moles_out')
         
     def compute(self, inputs, outputs):
         n_i = inputs['n_i']
