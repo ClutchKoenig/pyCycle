@@ -234,22 +234,15 @@ class SpeciesFlowCalc(om.ExplicitComponent):
 
         idx = np.arange(self._n)
 
-        self.add_input('n_i_in', val= np.ones(self._n), units=None, 
+        self.add_input('n_i', val= np.ones(self._n), units=None, 
                        desc= 'array containing all n [mol/g] for all possible species ' \
-                             'given the channel elemental composition. Comes from base_thermo.n') # ChemEq doesnt have units declared for the moles :/
-        
-        self.add_input('n_moles_in', val= 1e-2, units=None, desc='Total molar flow')
-        self.add_input('n_i_out', np.ones(self._n), units=None)
-        self.add_input('n_moles_out', val=1e-2, units=None)
+                       'given the channel elemental composition.') # ChemEq doesnt have units declared for the moles :/
+        self.add_input('n_moles', val= 1e-2, units=None, desc='Total molar flow')
 
-        self.add_output('x_i_in', val=np.ones(self._n), units=None,
+        self.add_output('x_i', val=np.ones(self._n), units=None,
                         desc='array containing all mole fractions')
-        self.add_output('x_i')
-        self.declare_partials('x_i_in', 'n_i_in',     rows=idx, cols=idx)
-        self.declare_partials('x_i_in', 'n_moles_in')
-        
-        self.declare_partials('x_i_out', 'n_i_out',     rows=idx, cols=idx)
-        self.declare_partials('x_i_out', 'n_moles_out')
+        self.declare_partials('x_i', 'n_i',     rows=idx, cols=idx)
+        self.declare_partials('x_i', 'n_moles')
         
     def compute(self, inputs, outputs):
         n_i = inputs['n_i']
