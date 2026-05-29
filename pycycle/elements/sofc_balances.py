@@ -238,18 +238,33 @@ class SpeciesFlowCalc(om.ExplicitComponent):
                        desc= 'array containing all n [mol/g] for all possible species ' \
                        'given the channel elemental composition.') # ChemEq doesnt have units declared for the moles :/
         self.add_input('n_moles', val= 1e-2, units=None, desc='Total molar flow')
+        self.add_input('W', val=1.0, units='g/s')
 
+        self.add_output('n_flow', val=1e-2, units= 'mol/s')
         self.add_output('x_i', val=np.ones(self._n), units=None,
                         desc='array containing all mole fractions')
-        self.declare_partials('x_i', 'n_i',     rows=idx, cols=idx)
-        self.declare_partials('x_i', 'n_moles')
         
+        self.declare_partials('x_i', 'n_i',     rows=idx, cols=idx)
+        self.declare_partials('x_i', 'n_moles', rows=idx, cols=np.zeros(self._n, dtype=int))
+        self.declare_partials('x_i', 'W',       val=0)
+        
+        self.declare_partials('n_flow', 'n_i', val= 0)
+        self.declare_partials('n_flow', 'n_moles')
+        self.declare_partials('n_flow', 'W')
+
     def compute(self, inputs, outputs):
         n_i = inputs['n_i']
         n = inputs['n_moles']
+        W = inputs['W']
         x_i = n_i / n
+
+        outputs['n_flow'] = n * W
         outputs['x_i'] = x_i
+
     
     def compute_partials(self, inputs, J):
-        J['x_i', 'n_i'] = 1.0 / inputs['n_moles'] * np.ones(self._n)
+        J['x_i', 'n_i'] = 1.0 / inputs['n_moles']# Since the shape is already defined in declare_partials this part is unneccessary_ * np.ones(self._n)
         J['x_i', 'n_moles'] = - inputs['n_i'] / inputs['n_moles']**2
+
+        J['n_flow', 'n_moles']  = inputs['W']
+        J['n_flow', 'W']        = inputs['n_moles']
