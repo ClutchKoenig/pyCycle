@@ -34,28 +34,31 @@ class HeatConvection(om.Group):
         
         
         self.add_subsystem('PEN_A', HeatConvectionElectrode(electrode='anode', structure='PEN'),
-                           promotes_inputs = [('lambda', 'lambda_A'),
-                                             ('T_channel_in', 'T_A_in'),
-                                             ('T_channel_out', 'T_A_out')],
-                           promotes_outputs =[('Q_conv_', 'Q_conv_PEN_A')]) 
-                                             
-        
+                           promotes_inputs=[('lambda',        'lambda_A'),
+                                            ('T_channel_in',  'T_A_in'),
+                                            ('T_channel_out', 'T_A_out'),
+                                            ('T_struc_out',   'T_PEN')],
+                           promotes_outputs=[('Q_conv_', 'Q_conv_PEN_A')])
+
         self.add_subsystem('PEN_C', HeatConvectionElectrode(electrode='cathode', structure='PEN'),
-                           promotes_inputs = [('lambda', 'lambda_C'),
-                                             ('T_channel_in', 'T_C_in'),
-                                             ('T_channel_out', 'T_C_out')],
-                           promotes_outputs=[('Q_conv_', 'Q_conv_PEN_C')])  
-                                             
+                           promotes_inputs=[('lambda',        'lambda_C'),
+                                            ('T_channel_in',  'T_C_in'),
+                                            ('T_channel_out', 'T_C_out'),
+                                            ('T_struc_out',   'T_PEN')],
+                           promotes_outputs=[('Q_conv_', 'Q_conv_PEN_C')])
+
         self.add_subsystem('IC_A', HeatConvectionElectrode(electrode='anode', structure='IC'),
-                           promotes_inputs = [('lambda', 'lambda_A'),
-                                             ('T_channel_in', 'T_A_in'),
-                                             ('T_channel_out', 'T_A_out')],
+                           promotes_inputs=[('lambda',        'lambda_A'),
+                                            ('T_channel_in',  'T_A_in'),
+                                            ('T_channel_out', 'T_A_out'),
+                                            ('T_struc_out',   'T_IC')],
                            promotes_outputs=[('Q_conv_', 'Q_conv_IC_A')])
-        
+
         self.add_subsystem('IC_C', HeatConvectionElectrode(electrode='cathode', structure='IC'),
-                           promotes_inputs = [('lambda', 'lambda_C'),
-                                             ('T_channel_in', 'T_C_in'),
-                                             ('T_channel_out', 'T_C_out')],
+                           promotes_inputs=[('lambda',        'lambda_C'),
+                                            ('T_channel_in',  'T_C_in'),
+                                            ('T_channel_out', 'T_C_out'),
+                                            ('T_struc_out',   'T_IC')],
                            promotes_outputs=[('Q_conv_', 'Q_conv_IC_C')])
 
         # Connect thermodynamic variables: 
@@ -145,7 +148,7 @@ class HeatConvectionElectrode(om.ExplicitComponent):
         T_bulk = (inputs['T_channel_in'] + inputs['T_channel_out']) / 2
         outputs['T_bulk'] = T_bulk
         alpha =  inputs['Nu'] * inputs['lambda'] / inputs['d_hyd']
-        dT = inputs['T_channel_out'] - inputs['T_struc_out']
+        dT = inputs['T_struc_out'] - inputs['T_channel_out']
 
         if structure == 'PEN':
             Q_conv_ = alpha * inputs['A'] * dT
@@ -159,21 +162,21 @@ class HeatConvectionElectrode(om.ExplicitComponent):
         structure = self.options['structure']
 
         alpha =  inputs['Nu'] * inputs['lambda'] / inputs['d_hyd']
-        dT = inputs['T_channel_out'] - inputs['T_struc_out']
+        dT = inputs['T_struc_out'] - inputs['T_channel_out']
 
         if structure == 'PEN':
-            J['Q_conv_', 'T_channel_out']   = alpha * inputs['A'] 
-            J['Q_conv_', 'T_struc_out']     = -alpha * inputs['A'] 
+            J['Q_conv_', 'T_channel_out']   = -alpha * inputs['A']
+            J['Q_conv_', 'T_struc_out']     =  alpha * inputs['A']
             J['Q_conv_', 'Nu']              = inputs['lambda'] / inputs['d_hyd'] * inputs['A'] * dT
             J['Q_conv_', 'd_hyd']           = - inputs['Nu'] * inputs['lambda'] / inputs['d_hyd']**2 * inputs['A'] * dT
             J['Q_conv_', 'A']               = alpha * dT
             J['Q_conv_', 'A_ic_side']       = 0
-            J['Q_conv_',  'lambda']          = inputs['Nu'] / inputs['d_hyd'] * inputs['A'] * dT 
+            J['Q_conv_',  'lambda']          = inputs['Nu'] / inputs['d_hyd'] * inputs['A'] * dT
 
         elif structure == 'IC':
             A_combined = inputs['A'] + inputs['A_ic_side']
-            J['Q_conv_', 'T_channel_out']   = alpha * (A_combined)
-            J['Q_conv_', 'T_struc_out']     = -alpha * (A_combined)
+            J['Q_conv_', 'T_channel_out']   = -alpha * (A_combined)
+            J['Q_conv_', 'T_struc_out']     =  alpha * (A_combined)
             J['Q_conv_', 'Nu']              = inputs['lambda'] / inputs['d_hyd'] * (A_combined) * dT
             J['Q_conv_', 'd_hyd']           = - inputs['Nu'] * inputs['lambda'] / inputs['d_hyd']**2 * (A_combined) * dT
             J['Q_conv_', 'A']               = alpha * dT
