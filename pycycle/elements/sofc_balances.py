@@ -19,25 +19,23 @@ class PENEnergyBalance(om.ImplicitComponent):
 
     def setup(self):
 
-        self.add_input('Qdot_conv_PEN_an',    val=0.0, units='W', desc='Convective heat from anode to PEN')
-        self.add_input('Qdot_conv_PEN_cat',   val=0.0, units='W', desc='Convective heat from cathode to PEN')
-        
-        self.add_input('Qdot_cond_PEN_left',  val=0.0, units='W', desc='Conductive heat flux, left')
-        self.add_input('Qdot_cond_PEN_right', val=0.0, units='W', desc='Conductive heat flux, right')
-        
+        self.add_input('Q_conv_PEN_A',    val=0.0, units='W', desc='Convective heat from anode channel to PEN')
+        self.add_input('Q_conv_PEN_C',    val=0.0, units='W', desc='Convective heat from cathode channel to PEN')
+
+        self.add_input('Q_cond_PEN_left',  val=0.0, units='W', desc='Conductive heat flux, left')
+        self.add_input('Q_cond_PEN_right', val=0.0, units='W', desc='Conductive heat flux, right')
+
         self.add_input('N_cell', val=1.0,  units=None,  desc='Number of cells')
 
         self.add_output('T_PEN', val=1001.9, units='K', desc='PEN temperature')
-        #self.add_output('PEN_residuum',  val=0.0,   units='W', desc='Energy balance residual')
-        passive_inputs = ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 
-                        'Qdot_cond_PEN_left', 'Qdot_cond_PEN_right']
-        
+        passive_inputs = ['Q_conv_PEN_A', 'Q_conv_PEN_C', 'Q_cond_PEN_left', 'Q_cond_PEN_right']
+
         seg_type = self.options['seg_type']
 
         if seg_type == 'active':
-            self.add_input('Qdot_chem',val=0.0, units='W', desc='Chemical heat release')
-            self.add_input('I',        val=1.0, units='A', desc='Current')
-            self.add_input('V_cell',   val=0.7, units='V', desc='Cell voltage')
+            self.add_input('Qdot_chem', val=0.0, units='W', desc='Chemical heat release')
+            self.add_input('I',         val=1.0, units='A', desc='Current')
+            self.add_input('V_cell',    val=0.7, units='V', desc='Cell voltage')
             active_inputs = ['Qdot_chem', 'I', 'V_cell', 'N_cell']
             self.declare_partials('T_PEN', active_inputs)
 
@@ -50,10 +48,10 @@ class PENEnergyBalance(om.ImplicitComponent):
     def apply_nonlinear(self, inputs, outputs, residuals):
         seg_type = self.options['seg_type']
 
-        Q_conv_an = inputs['Qdot_conv_PEN_an']
-        Q_conv_cat = inputs['Qdot_conv_PEN_cat']
-        Q_cond_left = inputs['Qdot_cond_PEN_left']
-        Q_cond_right = inputs['Qdot_cond_PEN_right']
+        Q_conv_an = inputs['Q_conv_PEN_A']
+        Q_conv_cat = inputs['Q_conv_PEN_C']
+        Q_cond_left = inputs['Q_cond_PEN_left']
+        Q_cond_right = inputs['Q_cond_PEN_right']
 
         if seg_type == 'active':
             P_elec = inputs['I'] * inputs['V_cell'] * inputs['N_cell']
@@ -63,7 +61,7 @@ class PENEnergyBalance(om.ImplicitComponent):
             P_elec = 0
             Q_chem = 0
 
-        energy_balance = ( Q_conv_cat + Q_conv_an - Q_chem - P_elec + Q_cond_left +Q_cond_right)
+        energy_balance = Q_chem - P_elec - Q_conv_an - Q_conv_cat + Q_cond_left + Q_cond_right
         residuals['T_PEN'] = energy_balance
 
         #outputs['PEN_residuum'] = energy_balance
@@ -71,16 +69,16 @@ class PENEnergyBalance(om.ImplicitComponent):
     def linearize(self, inputs, outputs, J):
         seg_type = self.options['seg_type']
 
-        J['T_PEN', 'Qdot_conv_PEN_an']       = 1.0
-        J['T_PEN', 'Qdot_conv_PEN_cat']      = 1.0
-        J['T_PEN', 'Qdot_cond_PEN_left']  = 1.0
-        J['T_PEN', 'Qdot_cond_PEN_right'] = 1.0
+        J['T_PEN', 'Q_conv_PEN_A']     = -1.0
+        J['T_PEN', 'Q_conv_PEN_C']     = -1.0
+        J['T_PEN', 'Q_cond_PEN_left']  =  1.0
+        J['T_PEN', 'Q_cond_PEN_right'] =  1.0
 
         if seg_type == 'active':
             J['T_PEN', 'N_cell']    = -inputs['I'] * inputs['V_cell']
             J['T_PEN', 'V_cell']    = -inputs['I'] * inputs['N_cell']
             J['T_PEN', 'I']         = -inputs['V_cell'] * inputs['N_cell']
-            J['T_PEN', 'Qdot_chem'] = -1.0
+            J['T_PEN', 'Qdot_chem'] =  1.0
 
         # # PEN_residuum shares the same derivatives
         # for key in ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 'Qdot_chem',
@@ -110,30 +108,26 @@ class ICEnergyBalance(om.ImplicitComponent):
         self.add_input('Q_cond_IC_right', val=0, units='W')
 
         self.add_output('T_IC', val=1000, units='K')
-        self.add_output('IC_residuum', val=0, units='W')
-        self.declare_partials('T_IC', ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 
-                                         'Q_dot_loss', 'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right'])
-        self.declare_partials('T_IC', 'T_cell', val=0)
-        self.declare_partials('IC_residuum', ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 
-                                              'Q_dot_loss', 'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right'])
-        
-    def apply_nonlinear(self, inputs, outputs, residuals):
-        energy_balance = (inputs['Qdot_conv_IC_an'] + inputs['Qdot_conv_IC_cat'] - 
-                          inputs['Q_dot_loss'] + 
-                          inputs['Qdot_conduct_IC_left'] + inputs['Qdot_conduct_IC_right'] )
-        residuals['T_IC'] = energy_balance
-        outputs['IC_residuum'] = energy_balance
 
-    def linearize(self, inputs, outputs, J):
-        J['T_IC', 'Qdot_conv_IC_an'] = 1
-        J['T_IC', 'Qdot_conv_IC_cat'] = 1
-        J['T_IC', 'Q_dot_loss'] = - 1
-        J['T_IC', 'Qdot_conduct_IC_left'] = 1
-        J['T_IC', 'Qdot_conduct_IC_left'] = 1
+        _inputs = ['Q_conv_IC_A', 'Q_conv_IC_C', 'Q_dot_loss', 'Q_cond_IC_left', 'Q_cond_IC_right']
+        self.declare_partials('T_IC',        _inputs)
+        self.declare_partials('T_IC', 'T_IC', val=0)
+
+
+    def apply_nonlinear(self, inputs, outputs, residuals):
+        energy_balance = (-inputs['Q_conv_IC_A'] - inputs['Q_conv_IC_C']
+                          - inputs['Q_dot_loss']
+                          + inputs['Q_cond_IC_left'] + inputs['Q_cond_IC_right'])
+        residuals['T_IC'] = energy_balance
         
-        for key in ['Qdot_conv_IC_an', 'Qdot_conv_IC_cat', 'Q_dot_loss', 
-                    'Qdot_conduct_IC_left', 'Qdot_conduct_IC_right']:
-            J['IC_residuum', key] = J['T_IC', key]
+
+    def linearize(self, inputs, outputs, J):  # noqa: ARG002
+        J['T_IC', 'Q_conv_IC_A']     = -1
+        J['T_IC', 'Q_conv_IC_C']     = -1
+        J['T_IC', 'Q_dot_loss']      = -1
+        J['T_IC', 'Q_cond_IC_left']  =  1
+        J['T_IC', 'Q_cond_IC_right'] =  1
+
 
 class ChannelEnergyBalance(om.ImplicitComponent):
     """
@@ -199,11 +193,6 @@ class ChannelEnergyBalance(om.ImplicitComponent):
 
         if self.options['loss']:
             J['T_channel', 'Q_loss']     = -1.0
-    def linearize(self, inputs, outputs, J):        
-        J['T_channel', 'Q_conv_channel'] = 1
-        J['T_channel', 'Q_conv_PEN'] = -1
-        J['T_channel', 'Q_conv_IC'] = -1
-        J['T_channel', 'T_channel'] = 0
 
 class SpeciesFlowCalc(om.ExplicitComponent):
     """
