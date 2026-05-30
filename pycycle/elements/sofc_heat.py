@@ -19,10 +19,12 @@ class HeatConvection(om.Group):
                                                   promotes=['*'])
         
         self.add_subsystem('anode', HeatConvectionChannel(electrode='anode'),
-                           promotes_inputs=[('W_channel', 'W_A'), ('h_in', 'h_A_in'), ('h_out', 'h_A_out')], 
+                           promotes_inputs=[('W_in', 'W_in_A'), ('W_out', 'W_out_A'),
+                                            ('h_in', 'h_A_in'), ('h_out', 'h_A_out')],
                            promotes_outputs=[('Q_conv_ch', 'Q_conv_A')])
         self.add_subsystem('cathode', HeatConvectionChannel(electrode='cathode'),
-                           promotes_inputs=[('W_channel', 'W_C'), ('h_in', 'h_C_in'), ('h_out', 'h_C_out')],  
+                           promotes_inputs=[('W_in', 'W_in_C'), ('W_out', 'W_out_C'),
+                                            ('h_in', 'h_C_in'), ('h_out', 'h_C_out')],
                            promotes_outputs=[('Q_conv_ch', 'Q_conv_C')])
         
         self.add_subsystem('lambda_anode', ThermalConductivityMixture(mixture='H2/H2O'),
@@ -81,19 +83,22 @@ class HeatConvectionChannel(om.ExplicitComponent):
     def initialize(self):
         self.options.declare('electrode', values=['anode', 'cathode'])
     def setup(self):
-        self.add_input('W_channel', units='kg/s',   desc= 'Mass flow of channel')
+        self.add_input('W_in', units='kg/s',   desc= 'Mass flow of channel')
         self.add_input('h_in',      units='J/kg', )
         self.add_input('h_out',     units='J/kg')
+        self.add_input('W_out', units='kg/s')
 
         self.add_output('Q_conv_ch', units='W')
-        self.declare_partials('Q_conv_ch', ['W_channel', 'h_in', 'h_out'])
-    def compute(self, inputs, outputs):
-        outputs['Q_conv_ch'] = inputs['W_channel'] * (inputs['h_out'] - inputs['h_in'])
+        self.declare_partials('Q_conv_ch', ['W_in', 'W_out', 'h_in', 'h_out'])
 
-    def compute_partials(self, inputs, J): 
-        J['Q_conv_ch', 'W_channel'] = (inputs['h_out'] - inputs['h_in'])
-        J['Q_conv_ch', 'h_in']      = -inputs['W_channel']
-        J['Q_conv_ch', 'h_out']      = inputs['W_channel']
+    def compute(self, inputs, outputs):
+        outputs['Q_conv_ch'] = inputs['W_out'] * inputs['h_out'] - inputs['W_in'] * inputs['h_in']
+
+    def compute_partials(self, inputs, J):
+        J['Q_conv_ch', 'W_out'] =  inputs['h_out']
+        J['Q_conv_ch', 'h_out'] =  inputs['W_out']
+        J['Q_conv_ch', 'W_in']  = -inputs['h_in']
+        J['Q_conv_ch', 'h_in']  = -inputs['W_in']
         
 
 class HeatConvectionElectrode(om.ExplicitComponent):
@@ -465,32 +470,33 @@ class HeatConduction(om.Group):
 
     def setup(self):
         N_segments = self.options['N_segments']
-        self.add_subsystem('IC_Conduction', HeatConductionStructure(structure='IC', N_segments=N_segments), 
-                           promotes_inputs=[('T_cell_left', 'T_IC_left'), 
-                                            ('T_cell_right', 'T_IC_right'),
-                                            ('','')], #TODO: get all geometric parameters promoted to this level and higher!!
-                           promotes_outputs=[('Q_cond_struc_right','Q_cond_right_IC'), 
-                                             ('Q_cond_struc_left', 'Q_cond_left_IC') ])
-        self.add_subsystem('PEN_Conduction', HeatConductionStructure(structure='PEN', N_segments=N_segments), 
-                           promotes_inputs=[()]
-                           promotes_outputs=[('Q_cond_struc_right','Q_cond_right_PEN'), ('Q_cond_struc_left', 'Q_cond_left_PEN') ])
+        self.add_subsystem('IC_Conduction', HeatConductionStructure(structure='IC', N_segments=N_segments),
+                           promotes_inputs=[('T_cell_left',  'T_IC_left'),
+                                            ('T_cell_right', 'T_IC_right')],  #TODO: promote geometric parameters
+                           promotes_outputs=[('Q_cond_struc_right', 'Q_cond_IC_right'), 
+                                             ('Q_cond_struc_left',  'Q_cond_IC_left')])
+        self.add_subsystem('PEN_Conduction', HeatConductionStructure(structure='PEN', N_segments=N_segments),
+                           promotes_inputs=[('T_cell_left',  'T_PEN_left'),
+                                            ('T_cell_right', 'T_PEN_right')],  #TODO: promote geometric parameters
+                           promotes_outputs=[('Q_cond_struc_right', 'Q_cond_PEN_right'),
+                                             ('Q_cond_struc_left',  'Q_cond_PEN_left')])
                             #TODO: get all geometric parameters promoted to this level and higher!!
-        self.add_subsystem('Q_conduc_left', om.ExecComp('Qc_left = Q_cond_left_IC + Q_cond_left_PEN',
-                                                        Q_cond_left_IC= {'val':-1000, 'units':'W'},
-                                                        Q_cond_left_PEN= {'val':-1000, 'units': 'W'},
+        self.add_subsystem('Q_conduc_left', om.ExecComp('Qc_left = Q_cond_IC_left + Q_cond_PEN_left',
+                                                        Q_cond_IC_left= {'val':-1000, 'units':'W'},
+                                                        Q_cond_PEN_left= {'val':-1000, 'units': 'W'},
                                                         Qc_left = {'val': -2000, 'units': 'W'}),
                                                         promotes_outputs=['Qc_left'])
-        self.add_subsystem('Q_conduc_right', om.ExecComp('Qc_right = Q_cond_right_IC + Q_cond_right_PEN',
-                                                        Q_cond_right_IC= {'val':1000, 'units':'W'},
-                                                        Q_cond_right_PEN= {'val':1000, 'units': 'W'},
+        self.add_subsystem('Q_conduc_right', om.ExecComp('Qc_right = Q_cond_IC_right + Q_cond_PEN_right',
+                                                        Q_cond_IC_right= {'val':1000, 'units':'W'},
+                                                        Q_cond_PEN_right= {'val':1000, 'units': 'W'},
                                                         Qc_right = {'val': 2000, 'units': 'W'}),
                                                         promotes_outputs=['Qc_right'])
         
-        self.connect('Q_cond_left_IC',  'Q_conduc_left.Q_cond_left_IC')
-        self.connect('Q_cond_right_IC', 'Q_conduc_right.Q_cond_right_IC')
+        self.connect('Q_cond_IC_left',  'Q_conduc_left.Q_cond_IC_left')
+        self.connect('Q_cond_IC_right', 'Q_conduc_right.Q_cond_IC_right')
 
-        self.connect('Q_cond_left_PEN',  'Q_conduc_left.Q_cond_left_PEN')
-        self.connect('Q_cond_right_PEN', 'Q_conduc_right.Q_cond_right_PEN')
+        self.connect('Q_cond_PEN_left',  'Q_conduc_left.Q_cond_PEN_left')
+        self.connect('Q_cond_PEN_right', 'Q_conduc_right.Q_cond_PEN_right')
 
         self.linear_solver = om.LinearRunOnce()
 
