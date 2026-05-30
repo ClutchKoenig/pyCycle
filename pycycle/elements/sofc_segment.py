@@ -206,13 +206,21 @@ class SegmentSOFC(om.Group):
                                promotes_outputs=['V_cell', 'Qdot_chem',
                                                  'U_Nernst', 'U_OCV'])
 
-            self.add_subsystem('Utilization',
-                               sofc.SpeciesUtilization(thermo=anode_out_props),
+            self.add_subsystem('H2_Utilization',
+                               sofc.SpeciesUtilization(thermo=anode_out_props,
+                                                       species='H2'),
                                promotes_inputs=[('n_in', 'n_in_A'),
                                                 ('x_in', 'x_in_A'),
                                                 'I', 'n_cell'],
-                               promotes_outputs=['H2_utilization', 'O2_utilization',
-                                                 'H2_consumed_mol', 'O2_consumed_mol'])
+                               promotes_outputs=['H2_utilization', 'H2_consumed_mol'])
+
+            self.add_subsystem('O2_Utilization',
+                               sofc.SpeciesUtilization(thermo=cathode_out_props,
+                                                       species='O2'),
+                               promotes_inputs=[('n_in', 'n_in_C'),
+                                                ('x_in', 'x_in_C'),
+                                                'I', 'n_cell'],
+                               promotes_outputs=['O2_utilization', 'O2_consumed_mol'])
 
         # ==============================================================
         # Internal connections
