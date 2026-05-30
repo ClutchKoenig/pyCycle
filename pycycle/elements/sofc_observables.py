@@ -79,3 +79,39 @@ class SpeciesUtilization(om.ExplicitComponent):
         J['H2_utilization','n_cell'] = I / (2*FARADAY) / (n_in * x_in[self._H2idx])
         J['H2_utilization','x_in']   = -H2_used / (n_in * x_in[self._H2idx]**2)
         J['H2_utilization','n_in']   = -H2_used / (n_in**2 * x_in[self._H2idx])
+
+class MassSanityCheck(om.ExplicitComponent):
+    def setup(self):
+        self.add_input('W_in_A' , val=1.0, units='kg/s', desc='Inlet massflow W [kg/s]')
+        self.add_input('W_in_C' , val=1.0, units='kg/s', desc='Inlet massflow W [kg/s]')
+        self.add_input('W_out_A', val=1.0, units='kg/s', desc='Outlet massflow W [kg/s]')
+        self.add_input('W_out_C', val=1.0, units='kg/s', desc='Outlet massflow W [kg/s]')
+
+        self.add_output('W_res', val=0., units='kg/s')
+
+
+
+class BulkComposition(om.ExplicitComponent):
+    def initialize(self):
+        self.options.declare('thermo', desc='thermodynamic data object', recordable=False)
+    def setup(self):
+        thermo = self.options['thermo']
+        self._n = thermo.num_prod
+        self._H2idx = thermo.products.index('H2') if 'H2' in thermo.products else None
+        self._O2idx = thermo.products.index('O2') if 'O2' in thermo.products else None
+        self._H2Oidx = thermo.products.index('H2O') if 'H2O' in thermo.products else None
+        idx = np.arange(self._n)
+
+        self.add_input('x_in', val=np.ones(self._n), units=None)
+        self.add_input('x_out',val=np.ones(self._n), units=None)
+
+        self.add_output('x_bulk', val=np.ones(self._n), units=None)
+        self.declare_partials('x_bulk', 'x_in',     rows=idx, cols=idx)
+        self.declare_partials('x_bulk',  'x_out',    rows=idx, cols=idx)
+
+    def compute(self, inputs, outputs):
+        outputs['x_bulk'] = (inputs['x_in'] + inputs['x_out']) / 2
+
+    def compute_partials(self, inputs, J):
+        J['x_bulk', 'x_in']     = 0.5
+        J['x_bulk', 'x_out']    = 0.5
