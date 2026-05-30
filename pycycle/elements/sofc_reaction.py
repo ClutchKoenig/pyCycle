@@ -159,7 +159,7 @@ class AreaSpecificResistanceOverpotential(om.ExplicitComponent):
         J['ASR', 'R_c_asr'] = ASR_nom
         J['ASR', 'ASR_nom_750'] = exp_term * R_ref + R_c
 
-        J['eta_asr', 'T_PEN'] =             J['ASR', 'T'] * i
+        J['eta_asr', 'T_PEN'] =             J['ASR', 'T_PEN'] * i
         J['eta_asr', 'i'] =             (exp_term * R_ref + R_c) * ASR_nom
         J['eta_asr', 'T_ref_asr'] =     J['ASR', 'T_ref_asr'] * i
         J['eta_asr', 'E_a_asr'] =       J['ASR', 'E_a_asr'] * i
