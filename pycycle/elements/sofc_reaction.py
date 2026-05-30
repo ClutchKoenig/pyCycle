@@ -116,14 +116,14 @@ class AreaSpecificResistanceOverpotential(om.ExplicitComponent):
         self.add_input('T_PEN',     val=1001.9, units='K', desc='Temperature at and in the electrochemical active area')
         self.add_input('T_ref_asr', val=800,    units='K', desc='Reference Temperature at which Correlation of ASR is calibrated with')
         self.add_input('E_a_asr',   val=0.2,       units='V', desc='Reference activation energy')
-        self.add_input('R_ref_asr', val=,       units='ohm', desc='Reference asr resistance')
-        self.add_input('R_c_asr',   val=,       units='ohm', desc='Reference asr resistance')
-        self.add_input('ASR_nom_750',val=,      units='ohm*m**2', desc=)
-        self.add_input('i',         val=,       units='A/m/m', desc='Current density')
+        self.add_input('R_ref_asr', val=1.0,    units='ohm',      desc='Reference asr resistance')
+        self.add_input('R_c_asr',   val=1.0,    units='ohm',      desc='Reference asr resistance')
+        self.add_input('ASR_nom_750',val=1e-4,  units='ohm*m**2', desc='Nominal ASR at 750 C')
+        self.add_input('i',         val=1.0,    units='A/m**2',   desc='Current density')
         # Einheiten inkonsistent? Was hat ASR_nom für ne Einheit?
         # eta_asr = A/ m**2 * ohm * ASR (ohm*m**2?)
-        self.add_output('ASR', val=, units='ohm*m**2', desc=)
-        self.add_output('eta_asr', val=, units='V', desc='')
+        self.add_output('ASR',     val=1e-4,   units='ohm*m**2', desc='Area specific resistance')
+        self.add_output('eta_asr', val=0.1,    units='V',        desc='ASR overpotential')
 
         self.declare_partials('ASR', ['T_PEN', 'T_ref_asr', 'E_a_asr', 'R_ref_asr', 'R_c_asr', 'ASR_nom_750'])
         self.declare_partials('eta_asr', ['T_PEN', 'i', 'T_ref_asr', 'E_a_asr', 'R_ref_asr', 'R_c_asr', 'ASR_nom_750'])
@@ -305,7 +305,7 @@ class SpeciesPartialPressure(om.ExplicitComponent):
             outputs[f'a_{species}'] = a_i
             
 
-class CurrentDensityCalc(Element):
+class CurrentDensityCalc(om.ExplicitComponent):
     """
     Computes current density i = I / (A / N_seg) = I * N_seg / A
 
@@ -322,10 +322,10 @@ class CurrentDensityCalc(Element):
 
     def setup(self):
         self.add_input('I', val=100,    units='A',      desc='Current in the segment. Only > 0 for active segments')
-        self.add_input('A', val=,       units='m**2',   desc='Cross-sectional area of current flux - perpendicular to FLow direction') # promote input
+        self.add_input('A', val=0.01,   units='m**2',   desc='Cross-sectional area of current flux - perpendicular to FLow direction') # promote input
 
         
-        self.add_output('i', val=, units='A/m/m',desc='Current density in segment')
+        self.add_output('i', val=1.0, units='A/m**2', desc='Current density in segment')
         self.declare_partials('i', ['I','A'])
 
     def compute(self, inputs, outputs):
@@ -341,8 +341,6 @@ class CurrentDensityCalc(Element):
         J['i', 'I'] = N_seg / A
         J['i', 'A'] = - N_seg * I / (A**2 )
         
-
-class segment_calc
 
 class ElectroChemistry(om.Group):
     """
@@ -381,7 +379,10 @@ class ElectroChemistry(om.Group):
                            promotes_outputs=['ASR', 'eta_asr'])
 
         self.add_subsystem('Nernst_Calc', NernstThermo(),
-                           promotes_inputs=['I', ('T', 'T_PEN'), ('P', 'P_cat')],
+                           promotes_inputs=['I', ('T', 'T_PEN'), ('P', 'P_cat'),
+                                            ('x_H2'),
+                                            ('x_O2'),
+                                            ('x_H2O')],
                            promotes_outputs=[('E_Nernst', 'U_Nernst'), ('E_OCV', 'U_OCV'), 'Qdot_chem'])
         
         self.add_subsystem('voltage', VoltageCalc(),
