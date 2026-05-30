@@ -23,7 +23,7 @@ class SegmentSOFC(om.Group):
         I                              segment current [A]  (active only)
         T_PEN_left, T_PEN_right        neighbor PEN temperatures [K]
         T_IC_left,  T_IC_right         neighbor IC  temperatures [K]
-        N_cell                         number of cells [-]
+        n_cell                         number of cells [-]
         (geometric parameters promoted via Conduction)
 
     Outputs:
@@ -240,3 +240,20 @@ class SegmentSOFC(om.Group):
             if O2_idx is not None:
                 self.connect('x_bulk_C', 'Electrochemistry.x_O2',
                              src_indices=[O2_idx])
+        
+        # Solver Setup:
+        newton = self.nonlinear_solver = om.NewtonSolver()
+        newton.options['rtol'] = 1e-8
+        newton.options['atol'] = 1e-8
+        newton.options['iprint'] = 2
+        newton.options['maxiter'] = 50
+        newton.options['solve_subsystems'] = True
+        newton.options['max_sub_solves'] = 5
+        newton.options['reraise_child_analysiserror'] = True
+             
+        ls = newton.linesearch = om.ArmijoGoldsteinLS()
+        ls.options['maxiter'] = 10
+        ls.options['rho'] = 0.75
+
+        self.linear_solver = om.DirectSolver()
+
