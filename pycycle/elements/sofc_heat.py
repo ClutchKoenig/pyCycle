@@ -213,18 +213,37 @@ class ThermalConductivityMixture(om.ExplicitComponent):
     def compute(self, inputs, outputs):
         mixture = self.options['mixture']
         if mixture == 'air':
-            lambda_coeff1 = [a, b]
-            eta_coeff1    = [A,B,C,D,E]
-            lambda_coeff2 = [a, b]
-            eta_coeff2    = [A,B,C,D,E]
+            lambda_coeff1 = {'a': 0, 'b': 6.116e-05, 'c': 1.128e-02}
+            eta_coeff1    = {'A': -0.10257e-5,
+                             'B':    0.92625e-7,
+                             'C':   -0.80657e-10,
+                             'D':    0.05113e-12,
+                             'E':   -0.01295e-15}
+            
+            lambda_coeff2 = {'a': -0.0000000137, 'b': 0.0000740423, 'c':0.0052068912}
+            eta_coeff2    = {'A':     -0.01020e-5,
+                             'B':        0.74785e-7,
+                             'C':       -0.59037e-10,
+                             'D':        0.03230e-12,
+                             'E':       -0.00673e-15}
             M_1 = 31.99880 # g/mol O2
             M_2 = 28.014    # g/mol N2
 
         elif mixture =='H2/H2O':
-            lambda_coeff1 = [a, b]
-            eta_coeff1   = [A,B,C,D,E]
-            lambda_coeff2 = [a, b]
-            eta_coeff2   = [A,B,C,D,E]
+            lambda_coeff1 = {'a1': 3.799454545e-4, 'b1': 0.0804581818} #[a1, b1]
+
+            eta_coeff1   = {'A':    0.18024e-5, 
+                            'B':    0.27174e-7,
+                            'C':   -0.13395e-10,
+                            'D':    0.00585e-12,
+                            'E':   -0.00104e-15}
+            
+            #[A,B,C,D,E]
+            lambda_coeff2 = {'a2': -0.0086593279, 'b2': 0.0000747671, 'c2': 0.0000000294}
+
+            eta_coeff2 = {'A':   -3.01414856711936e-06,
+                          'B':    4.076228959276e-08}
+            
             M_1 = 2.016     # g/mol H2
             M_2 = 18.015    # g/mol H2O
         else: 
@@ -234,11 +253,14 @@ class ThermalConductivityMixture(om.ExplicitComponent):
         x1 = inputs['x1']
         x2 = inputs['x2']
 
-        lambda_1 =  a1 * T + b1
-        lambda_2 = a2 * T + b2
+        thermal_cond = lambda x, coeffs: np.polyval(list(coeffs.values()), x)
+        viscosity    = lambda x, coeffs: np.polyval(list(reversed(coeffs.values())), x)
 
-        eta_1 = A1 + B1*T + C1* T**2 + D1 * T**3 + E1 * T**4
-        eta_2 = A2 + B2*T + C2* T**2 + D2 * T**3 + E2 * T**4
+        lambda_1 = thermal_cond(T, lambda_coeff1)
+        lambda_2 = thermal_cond(T, lambda_coeff2)
+        eta_1 = viscosity(T, eta_coeff1)
+        eta_2 = viscosity(T, eta_coeff2)
+        
 
         F12 = (1 + np.sqrt(eta_1/eta_2) * (M_2/M_1)**(1/4) )**2 / np.sqrt(8 * (1 + M_1 / M_2))
         F21 = (1 + np.sqrt(eta_2/eta_1) * (M_1/M_2)**(1/4) )**2 / np.sqrt(8 * (1 + M_2 / M_1))
@@ -248,20 +270,37 @@ class ThermalConductivityMixture(om.ExplicitComponent):
     def compute_partials(self, inputs, J):
         mixture = self.options['mixture']
         if mixture == 'air':
-            # TODO: find coefficents in literature
-            lambda_coeff1 = [a, b]
-            eta_coeff1    = [A,B,C,D,E]
-            lambda_coeff2 = [a, b]
-            eta_coeff2    = [A,B,C,D,E]
+            lambda_coeff1 = {'a': 0, 'b': 6.116e-05, 'c': 1.128e-02}
+            eta_coeff1    = {'A': -0.10257e-5,
+                             'B':    0.92625e-7,
+                             'C':   -0.80657e-10,
+                             'D':    0.05113e-12,
+                             'E':   -0.01295e-15}
+            
+            lambda_coeff2 = {'a': -0.0000000137, 'b': 0.0000740423, 'c':0.0052068912}
+            eta_coeff2    = {'A':     -0.01020e-5,
+                             'B':        0.74785e-7,
+                             'C':       -0.59037e-10,
+                             'D':        0.03230e-12,
+                             'E':       -0.00673e-15}
             M_1 = 31.99880 # g/mol O2
             M_2 = 28.014    # g/mol N2
 
         elif mixture =='H2/H2O':
-            # TODO: find coefficents in literature
-            lambda_coeff1 = [a, b]
-            eta_coeff1   = [A,B,C,D,E]
-            lambda_coeff2 = [a, b]
-            eta_coeff2   = [A,B,C,D,E]
+            lambda_coeff1 = {'a1': 3.799454545e-4, 'b1': 0.0804581818} #[a1, b1]
+
+            eta_coeff1   = {'A':    0.18024e-5, 
+                            'B':    0.27174e-7,
+                            'C':   -0.13395e-10,
+                            'D':    0.00585e-12,
+                            'E':   -0.00104e-15}
+            
+            #[A,B,C,D,E]
+            lambda_coeff2 = {'a2': -0.0086593279, 'b2': 0.0000747671, 'c2': 0.0000000294}
+
+            eta_coeff2 = {'A':   -3.01414856711936e-06,
+                          'B':    4.076228959276e-08}
+            
             M_1 = 2.016     # g/mol H2
             M_2 = 18.015    # g/mol H2O
         else: 
@@ -271,10 +310,15 @@ class ThermalConductivityMixture(om.ExplicitComponent):
         x1 = inputs['x1']
         x2 = inputs['x2']
 
-        lambda_1 =  a1 * T + b1 
-        lambda_2 = a2*T + b2
-        eta_1 = A1 + B1*T + C1* T**2 + D1 * T**3 + E1 * T**4
-        eta_2 = A2 + B2*T + C2* T**2 + D2 * T**3 + E2 * T**4
+        thermal_cond      = lambda x, coeffs: np.polyval(list(coeffs.values()), x)
+        viscosity         = lambda x, coeffs: np.polyval(list(reversed(coeffs.values())), x)
+        d_thermal_cond_dT = lambda x, coeffs: np.polyval(np.polyder(list(coeffs.values())), x)
+        d_viscosity_dT    = lambda x, coeffs: np.polyval(np.polyder(list(reversed(coeffs.values()))), x)
+
+        lambda_1 = thermal_cond(T, lambda_coeff1)
+        lambda_2 = thermal_cond(T, lambda_coeff2)
+        eta_1    = viscosity(T, eta_coeff1)
+        eta_2    = viscosity(T, eta_coeff2)
         F12 = (1 + np.sqrt(eta_1/eta_2) * (M_2/M_1)**(1/4) )**2 / np.sqrt(8 * (1 + M_1 / M_2))
         F21 = (1 + np.sqrt(eta_2/eta_1) * (M_1/M_2)**(1/4) )**2 / np.sqrt(8 * (1 + M_2 / M_1))
         F12_denom = np.sqrt(8 * (1 + M_1 / M_2))
@@ -285,11 +329,10 @@ class ThermalConductivityMixture(om.ExplicitComponent):
 
         dL_dLam1 = x1 / Deriv_denom1
         dL_dLam2 = x2 / Deriv_denom2
-        dLam1_dT = a1
-        dLam2_dT = a2
-
-        deta1_dT = B1 + 2*C1 * T + 3*D1 * T**2 + 4*E1* T**3
-        deta2_dT = B2 + 2*C2 * T + 3*D2 * T**2 + 4*E2* T**3
+        dLam1_dT = d_thermal_cond_dT(T, lambda_coeff1)
+        dLam2_dT = d_thermal_cond_dT(T, lambda_coeff2)
+        deta1_dT = d_viscosity_dT(T, eta_coeff1)
+        deta2_dT = d_viscosity_dT(T, eta_coeff2)
         
         dF12_deta1 = 2 * (1 + np.sqrt(eta_1/eta_2) * (M_2/M_1)**(1/4) ) / F12_denom  * (1/ (2 * np.sqrt(eta_1 * eta_2)) * (M_2/M_1)**(1/4))
         dF12_deta2 = 2 * (1 + np.sqrt(eta_1/eta_2) * (M_2/M_1)**(1/4) ) / F12_denom * (- 1/2 * np.sqrt(eta_1) / np.sqrt(eta_2**3) * (M_2/M_1)**(1/4))
