@@ -72,8 +72,10 @@ class SegmentSOFC(om.Group):
         # Properties objects for SpeciesFlowCalc / BulkComposition / SpeciesUtilization.
         # All species-level calculations inside the segment use the outlet basis so
         # that x_in_A / x_out_A always have the same length.
-        anode_out_props   = Properties(spec, init_elements=anode_out_comp)
-        cathode_out_props = Properties(spec, init_elements=cathode_out_comp)
+        # Stored as instance attributes so callers can query species indices/sizes
+        # after prob.setup() without duplicating SOFCThermoAdd instantiation.
+        anode_out_props   = self.anode_out_props   = Properties(spec, init_elements=anode_out_comp)
+        cathode_out_props = self.cathode_out_props = Properties(spec, init_elements=cathode_out_comp)
 
         # Species indices needed for src_indices connections to Electrochemistry.
         H2_idx  = (anode_out_props.products.index('H2')
@@ -170,7 +172,8 @@ class SegmentSOFC(om.Group):
                                             'h_A_in',  'h_A_out',
                                             'h_C_in',  'h_C_out',
                                             'T_A_in',  'T_A_out',
-                                            'T_C_in',  'T_C_out'],
+                                            'T_C_in',  'T_C_out',
+                                            'T_PEN',   'T_IC'],
                            promotes_outputs=['Q_conv_A',     'Q_conv_C',
                                              'Q_conv_PEN_A', 'Q_conv_PEN_C',
                                              'Q_conv_IC_A',  'Q_conv_IC_C'])
@@ -227,8 +230,8 @@ class SegmentSOFC(om.Group):
         # ==============================================================
 
         # Reaction composition → outlet Thermo
-        self.connect('anode_rxn.composition_out',   'anode_thermo_out.composition')
-        self.connect('cathode_rxn.composition_out', 'cathode_thermo_out.composition')
+        self.connect('composition_out_A',   'anode_thermo_out.composition')
+        self.connect('composition_out_C', 'cathode_thermo_out.composition')
 
         # Outlet Thermo base_thermo → SpeciesFlowCalc
         # (n and n_moles are not promoted through the Thermo group boundary)
@@ -254,14 +257,15 @@ class SegmentSOFC(om.Group):
         newton.options['rtol'] = 1e-8
         newton.options['atol'] = 1e-8
         newton.options['iprint'] = 2
-        newton.options['maxiter'] = 50
+        newton.options['maxiter'] = 150
         newton.options['solve_subsystems'] = True
-        newton.options['max_sub_solves'] = 5
+        newton.options['max_sub_solves'] = 50
         newton.options['reraise_child_analysiserror'] = True
              
         ls = newton.linesearch = om.ArmijoGoldsteinLS()
-        ls.options['maxiter'] = 10
+        ls.options['maxiter'] = 20
         ls.options['rho'] = 0.75
+        ls.options['print_bound_enforce']=True
 
         self.linear_solver = om.DirectSolver()
 
