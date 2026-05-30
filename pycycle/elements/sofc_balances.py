@@ -22,15 +22,15 @@ class PENEnergyBalance(om.ImplicitComponent):
         self.add_input('Qdot_conv_PEN_an',    val=0.0, units='W', desc='Convective heat from anode to PEN')
         self.add_input('Qdot_conv_PEN_cat',   val=0.0, units='W', desc='Convective heat from cathode to PEN')
         
-        self.add_input('Qdot_conduct_PEN_left',  val=0.0, units='W', desc='Conductive heat flux, left')
-        self.add_input('Qdot_conduct_PEN_right', val=0.0, units='W', desc='Conductive heat flux, right')
+        self.add_input('Qdot_cond_PEN_left',  val=0.0, units='W', desc='Conductive heat flux, left')
+        self.add_input('Qdot_cond_PEN_right', val=0.0, units='W', desc='Conductive heat flux, right')
         
         self.add_input('N_cell', val=1.0,  units=None,  desc='Number of cells')
 
         self.add_output('T_PEN', val=1001.9, units='K', desc='PEN temperature')
         #self.add_output('PEN_residuum',  val=0.0,   units='W', desc='Energy balance residual')
         passive_inputs = ['Qdot_conv_PEN_an', 'Qdot_conv_PEN_cat', 
-                        'Qdot_conduct_PEN_left', 'Qdot_conduct_PEN_right']
+                        'Qdot_cond_PEN_left', 'Qdot_cond_PEN_right']
         
         seg_type = self.options['seg_type']
 
@@ -52,8 +52,8 @@ class PENEnergyBalance(om.ImplicitComponent):
 
         Q_conv_an = inputs['Qdot_conv_PEN_an']
         Q_conv_cat = inputs['Qdot_conv_PEN_cat']
-        Q_cond_left = inputs['Qdot_conduct_PEN_left']
-        Q_cond_right = inputs['Qdot_conduct_PEN_right']
+        Q_cond_left = inputs['Qdot_cond_PEN_left']
+        Q_cond_right = inputs['Qdot_cond_PEN_right']
 
         if seg_type == 'active':
             P_elec = inputs['I'] * inputs['V_cell'] * inputs['N_cell']
@@ -73,8 +73,8 @@ class PENEnergyBalance(om.ImplicitComponent):
 
         J['T_PEN', 'Qdot_conv_PEN_an']       = 1.0
         J['T_PEN', 'Qdot_conv_PEN_cat']      = 1.0
-        J['T_PEN', 'Qdot_conduct_PEN_left']  = 1.0
-        J['T_PEN', 'Qdot_conduct_PEN_right'] = 1.0
+        J['T_PEN', 'Qdot_cond_PEN_left']  = 1.0
+        J['T_PEN', 'Qdot_cond_PEN_right'] = 1.0
 
         if seg_type == 'active':
             J['T_PEN', 'N_cell']    = -inputs['I'] * inputs['V_cell']
@@ -98,16 +98,16 @@ class ICEnergyBalance(om.ImplicitComponent):
     I think a source term for joule heating since current is flowing in the IC. 
     Q_joule = I**2 * A_cell * ASR_IC ? 
     """
-    def initalize(self):
+    def initialize(self):
         self.options.declare('seg_type', default='passive', values=['active', 'passive'])
     def setup(self):
         seg_type = self.options['seg_type']
 
-        self.add_input('Qdot_conv_IC_an', val=0, units='W', desc= 'Convective heat from anode to IC')
-        self.add_input('Qdot_conv_IC_cat', val=0, units='W', desc= 'Convective heat from cathode to IC')
+        self.add_input('Q_conv_IC_A', val=0, units='W', desc= 'Convective heat from anode to IC')
+        self.add_input('Q_conv_IC_C', val=0, units='W', desc= 'Convective heat from cathode to IC')
         self.add_input('Q_dot_loss', val=0, units='W') # need a seperate component to calculate q_loss using Power and percent heat loss
-        self.add_input('Qdot_conduct_IC_left', val=0, units='W')
-        self.add_input('Qdot_conduct_IC_right', val=0, units='W')
+        self.add_input('Q_cond_IC_left', val=0, units='W')
+        self.add_input('Q_cond_IC_right', val=0, units='W')
 
         self.add_output('T_IC', val=1000, units='K')
         self.add_output('IC_residuum', val=0, units='W')
