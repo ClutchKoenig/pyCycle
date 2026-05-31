@@ -254,18 +254,18 @@ class SegmentSOFC(om.Group):
         
         # Solver Setup:
         newton = self.nonlinear_solver = om.NewtonSolver()
-        newton.options['rtol'] = 1e-8
-        newton.options['atol'] = 1e-8
+        newton.options['rtol'] = 1e-4
+        newton.options['atol'] = 1e-4
         newton.options['iprint'] = 2
-        newton.options['maxiter'] = 150
+        newton.options['maxiter'] = 50
         newton.options['solve_subsystems'] = True
-        newton.options['max_sub_solves'] = 50
-        newton.options['reraise_child_analysiserror'] = True
-             
+        newton.options['max_sub_solves'] = 10
+        newton.options['reraise_child_analysiserror'] = False
+
         ls = newton.linesearch = om.ArmijoGoldsteinLS()
-        ls.options['maxiter'] = 20
+        ls.options['maxiter'] = 10
         ls.options['rho'] = 0.75
-        ls.options['print_bound_enforce']=True
+        ls.options['print_bound_enforce'] = False
 
         self.linear_solver = om.DirectSolver()
 
