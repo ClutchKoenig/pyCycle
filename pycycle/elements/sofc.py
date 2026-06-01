@@ -28,6 +28,7 @@ class SOFC(pyc.Element):
         self.segments: list[str] = []
         self.N_seg_tot = self.options['N_passive'] + self.options['N_active'] + self.options['N_passive'])
         self.segments =  [f"segment_{i}" for i in range(self.options['N_passive']) + self.options['N_active'] + self.options['N_passive'])]
+        self.segments_active =#TODO
         super().initialize()
 
     def pyc_setup_output_ports(self):
@@ -58,7 +59,7 @@ class SOFC(pyc.Element):
         self.add_subsystem('inflow_cat', flow_in_cat,
                            promotes=['Fl_I_cat:tot:*', 'Fl_I_cat:stat:*'])
         
-        for i, name in enumerate(N_passive + N_active + N_passive):
+        for i, name in enumerate(self.segments):
             if i < (N_passive - 1):
                 self.add_subsystem(name, SegmentSOFC(type='passive',
                                                      N_seg = self.N_seg_tot),
@@ -79,6 +80,33 @@ class SOFC(pyc.Element):
                                                      cathode_composition= self.Fl_I_data['Fl_I_cat'],
                                                      spec = self.options['thermo_data'],
                                                      promotes_input=['n_cell'])
+        for i, name in enumerate(self.segments):
+            self.connect(f'{name}.W_out_A',         f'{self.segments[i + 1]}.W_in_A')
+            self.connect(f'{name}.W_out_C',         f'{self.segments[i + 1]}.W_in_C')
+            self.connect(f'{name}.h_out_A',         f'{self.segments[i + 1]}.h_in_A')
+            self.connect(f'{name}.T_A_out',         f'{self.segments[i + 1]}.T_A_in')
+            self.connect(f'{name}.T_C_out',         f'{self.segments[i + 1]}.T_C_in')
+            self.connect(f'{name}.x_out_A',         f'{self.segments[i + 1]}.x_in_A')
+            self.connect(f'{name}.x_out_C',         f'{self.segments[i + 1]}.x_in_C')
+
+            self.connect(f'{name}.composition_out_A',         f'{self.segments[i + 1]}.composition_in_A')
+            self.connect(f'{name}.composition_out_C',         f'{self.segments[i + 1]}.composition_in_C')
+
+            self.connect(f'{name}.n_out_A',          f'{self.segments[i + 1]}.n_in_A')
+            self.connect(f'{name}.n_out_C',          f'{self.segments[i + 1]}.n_in_C')
+
+            self.connect(f'{name}.p_A_out',         f'{self.segments[i + 1]}.P_A_in')
+            self.connect(f'{name}.p_C_out',         f'{self.segments[i + 1]}.P_C_in')
+
+            self.connect(f'{name}.T_PEN',           f'{self.segments[i + 1]}.T_PEN_left')
+            self.connect(f'{name}.T_IC',           f'{self.segments[i + 1]}.T_IC_left')
+
+
+            self.connect(f'{self.segments[i + 1]}.T_PEN',       f'{name}.T_PEN_right')
+            self.connect(f'{self.segments[i + 1]}.T_IC',        f'{name}.T_IC_right')
+
+
+
         # Flowstation connections
         self.connect('Fl_I_an:stat:W',              'Segment0.W_in_A')
         self.connect('Fl_I_an:tot:h',               'Segment0.h_in_A')
@@ -93,8 +121,30 @@ class SOFC(pyc.Element):
 
         self.add_subsystem('i_sum',         om.ExecComp(f'i_sum = {i}' for ))
 
-        balances = self.add_subsystem('balance', om.BalanceComp())
-        balances.add_balance('I', units='A', eq_units='V')
-        self.connect('balance.I', )
+        self.add_subsyste,('Ucell',         om.ExecComp('Ucell=Vcell'))
 
-        balances.add_balance('I')
+        balances = self.add_subsystem('balances', om.BalanceComp())
+        for i, segment in enumerate(self.segments):
+            balances.add_balance(f'{segment}_I', val = 1, units='A', eq_units='V' )
+            self.connect(f'balances.{segment}_I',        f'{segment}.I')
+            self.connect(f'{segment}.V_cell',           f'balances.lhs:{segment}_I')
+            self.connect('U_cell',                      f'balances.rhs:{segment}_I')
+
+
+        balances.add_balance('U_cell', val= 1, units='V', 
+                             eq_units='A',
+                             lower=0.3, upper=1.2,
+                             use_mult=False, #mult_val=-1
+                             )
+        self.connect('balances.U_cell',         'U_cell')
+        self.connect('i_sum.I_total',           'balances.lhs:U_cell')
+        self.connect('I',                       'balances.rhs:U_cell')
+        
+    
+
+class i_sum(om.ExplicitComponent):
+    def initialize(self):
+        self.options.declare('N_active', default=10, desc='Number of active Segments')
+    
+    def setup(self):
+        #TODO: finish
