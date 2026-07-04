@@ -4,18 +4,19 @@ from pycycle.api import ThermoAdd
 from sofc_api  import SOFCThermoAdd, SegmentSOFC 
 from pycycle.flow_in import FlowIn
 import numpy as np
-
+from pycycle.constants import CEA_AIR_COMPOSITION
 
 class SOFC(pyc.Element):
     """
     
     """
-    def initalize(self):
+    def initialize(self):
         self.options.declare('segments', default = ('Segment1'), types=(list,tuple), 
                              desc= 'List of MEA Segments in the Model')
-        self.options.declare('N_seg_active', default= 10, desc= 'Number of Segments with current Flow and chemical reactions')
-        self.options.declare('N_seg_passive', default = 7, desc= 'Number of segments without current and chemical reactions')
-
+        self.options.declare('N_active',    default = 10,   desc= 'Number of Segments with current Flow and chemical reactions')
+        self.options.declare('N_passive',   default = 7,    desc= 'Number of segments without current and chemical reactions')
+        self.options.declare('in_composition_anode',    default = )
+        self.options.declare('in_composition_cathode',  default = CEA_AIR_COMPOSITION)
         # self.options.declare('statics', default=True, 
         #                      desc='If True, calculate static properties')
 
@@ -26,8 +27,8 @@ class SOFC(pyc.Element):
             #tbd
         ]
         self.segments: list[str] = []
-        self.N_seg_tot = self.options['N_passive'] + self.options['N_active'] + self.options['N_passive'])
-        self.segments =  [f"segment_{i}" for i in range(self.options['N_passive']) + self.options['N_active'] + self.options['N_passive'])]
+        self.N_seg_tot = self.options['N_passive'] + self.options['N_active'] + self.options['N_passive']
+        self.segments =  [f"segment{i}" for i in range(self.options['N_passive'] + self.options['N_active'] + self.options['N_passive'])]
         self.segments_active =#TODO
         super().initialize()
 
@@ -37,50 +38,57 @@ class SOFC(pyc.Element):
         thermo_data = self.options['thermo_data']
 
         anode_rxn = SOFCThermoAdd(reaction_type='anode',
-                                                   spec =  spec,
-                                                   inflow_composition = self.Fl_I_dat['Fl_I_an']
-                                                   )
+                                  spec =  spec,
+                                  inflow_composition = self.Fl_I_data['Fl_I_an'])
+        
         cathode_rxn = SOFCThermoAdd(reaction_type = 'cathode',
                                     spec = spec,
                                     inflow_composition = self.Fl_I_data['Fl_I_cat'])
+        
         self.init_output_flow('Fl_O_an', anode_rxn)
         self.init_output_flow('Fl_O_cat', cathode_rxn)
         
         
     
     def setup(self):
-        N_active = self.options['N_seg_active']
-        N_passive = self.options['N_seg_passive']
+        N_active = self.options['N_active']
+        N_passive = self.options['N_passive']
 
-        flow_in_an = FlowIn('Fl_I_an')
+        flow_in_an  = FlowIn('Fl_I_an')
         flow_in_cat = FlowIn('Fl_I_cat') 
         self.add_subsystem('inflow_an', flow_in_an, 
-                           promotes=['Fl_I_an:tot:*', 'Fl_I_an:stat:*'])
+                           promotes = ['Fl_I_an:tot:*', 'Fl_I_an:stat:*'])
         self.add_subsystem('inflow_cat', flow_in_cat,
-                           promotes=['Fl_I_cat:tot:*', 'Fl_I_cat:stat:*'])
-        
+                           promotes = ['Fl_I_cat:tot:*', 'Fl_I_cat:stat:*'])
+        # NOTE: I made a big error in the way the compositions are currently passed into the segements,
+        #       or, to put it more precisly, they are not getting passed at all. Every segment gets the 
+        #       same composition. 
+        # 
         for i, name in enumerate(self.segments):
             if i < (N_passive - 1):
                 self.add_subsystem(name, SegmentSOFC(type='passive',
-                                                     N_seg = self.N_seg_tot),
-                                                     anode_composition= self.Fl_I_data['Fl_I_an'],
-                                                     cathode_composition= self.Fl_I_data['Fl_I_cat'],
-                                                     spec = self.options['thermo_data'])
+                                                     N_segments             = self.N_seg_tot,
+                                                     anode_composition      = self.Fl_I_data['Fl_I_an'],
+                                                     cathode_composition    = self.Fl_I_data['Fl_I_cat'],
+                                                     spec                   = self.options['thermo_data']))
                 
-            elif (N_passive - 1) < i < (N_passive + N_active - 1): 
+            elif (N_passive - 1) < i <= (N_passive + N_active - 1): 
                 self.add_subsystem(name, SegmentSOFC(type='active',
-                                                     N_seg = self.N_seg_tot),
-                                                     anode_composition= self.Fl_I_data['Fl_I_an'],
-                                                     cathode_composition= self.Fl_I_data['Fl_I_cat'],
-                                                     spec = self.options['thermo_data'])        
+                                                     N_segments             = self.N_seg_tot,
+                                                     anode_composition      = self.Fl_I_data['Fl_I_an'],
+                                                     cathode_composition    = self.Fl_I_data['Fl_I_cat'],
+                                                     spec                   = self.options['thermo_data']),
+                                                     promotes_input=['n_cell'])        
             elif i > (N_passive + N_active - 1):
                 self.add_subsystem(name, SegmentSOFC(type='passive',
-                                                     N_seg = self.N_seg_tot),
-                                                     anode_composition= self.Fl_I_data['Fl_I_an'],
-                                                     cathode_composition= self.Fl_I_data['Fl_I_cat'],
-                                                     spec = self.options['thermo_data'],
-                                                     promotes_input=['n_cell'])
-        for i, name in enumerate(self.segments):
+                                                     N_segments             = self.N_seg_tot,
+                                                     anode_composition      = self.Fl_I_data['Fl_I_an'],
+                                                     cathode_composition    = self.Fl_I_data['Fl_I_cat'],
+                                                     spec                   = self.options['thermo_data']))
+        for i, name in enumerate(self.segments[:-1]):
+            if i == len(self.segments):
+                break
+            
             self.connect(f'{name}.W_out_A',         f'{self.segments[i + 1]}.W_in_A')
             self.connect(f'{name}.W_out_C',         f'{self.segments[i + 1]}.W_in_C')
             self.connect(f'{name}.h_out_A',         f'{self.segments[i + 1]}.h_in_A')
@@ -104,24 +112,32 @@ class SOFC(pyc.Element):
 
             self.connect(f'{self.segments[i + 1]}.T_PEN',       f'{name}.T_PEN_right')
             self.connect(f'{self.segments[i + 1]}.T_IC',        f'{name}.T_IC_right')
-
+            
 
 
         # Flowstation connections
-        self.connect('Fl_I_an:stat:W',              'Segment0.W_in_A')
-        self.connect('Fl_I_an:tot:h',               'Segment0.h_in_A')
-        self.connect('Fl_I_an:tot:T',               'Segment0.T_A_in')
-        self.connect('Fl_I_an:tot:composition',     'Segment0.composition_in_A')
-        self.connect('Fl_I_an:tot:P',               'Segment0.')
+        # Anode:
+        self.connect('Fl_I_an:stat:W',              'segment0.W_in_A')
+        self.connect('Fl_I_an:tot:h',               'segment0.h_in_A')
+        self.connect('Fl_I_an:tot:T',               'segment0.T_A_in')
+        self.connect('Fl_I_an:tot:composition',     'segment0.composition_in_A')
+        self.connect('Fl_I_an:tot:P',               'segment0.')
+        # Temperature Connections
+        self.connect('T_PEN_left_0',                'segment0.T_PEN_left')
+        self.connect('T_PEN_right_0',               'segment0.T_PEN_right')# Should be the last segment if I am thinking correctly
+        self.connect('T_IC_right_0',                'segment0.T_IC_right')# Should be the last segment if I am thinking correctly
+        self.connect('T_IC_left_0',                 'segment0.T_IC_left')
         
-        self.connect('T_PEN_left_0',                'Segment0.T_PEN_left')
-        self.connect('T_PEN_right_0',               'Segment0.T_PEN_right')
-        self.connect('T_IC_right_0',                'Segment0.T_IC_right')
-        self.connect('T_IC_left_0',                 'Segment0.T_IC_left')
+        # Cathode:
+        self.connect('Fl_I_cat:stat:W',              'segment0.W_in_C')
+        self.connect('Fl_I_cat:tot:h',               'segment0.h_in_C')
+        self.connect('Fl_I_cat:tot:T',               'segment0.T_C_in')
+        self.connect('Fl_I_cat:tot:composition',     'segment0.composition_in_C')
+        self.connect('Fl_I_cat:tot:P',               'segment0.')
 
         self.add_subsystem('i_sum',         om.ExecComp(f'i_sum = {i}' for ))
 
-        self.add_subsyste,('Ucell',         om.ExecComp('Ucell=Vcell'))
+        self.add_subsystem('Ucell',         om.ExecComp('Ucell=Vcell'))
 
         balances = self.add_subsystem('balances', om.BalanceComp())
         for i, segment in enumerate(self.segments):
