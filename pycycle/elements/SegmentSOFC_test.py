@@ -66,6 +66,11 @@ seg = SegmentSOFC(
     N_segments=1,
     anode_composition=anode_comp,
     cathode_composition=cathode_comp,
+    # Standalone segment: both faces are simple boundaries (no real
+    # neighbor), so both need a local conduction link (default is a bare,
+    # externally-fed Q input on the right -- not what this isothermal-start
+    # smoke test wants).
+    right_bc='T',
 )
 prob.model = seg
 
@@ -171,19 +176,23 @@ prob.set_val('Convection.IC_C.A',         A_pen_act,     units='m**2')
 prob.set_val('Convection.IC_C.A_ic_side', A_ic_side_act, units='m**2')
 
 # Conduction — PEN  (length_cell = total active length; component divides by N_seg internally)
-prob.set_val('Conduction.PEN_Conduction.length_cell',      length_active,  units='m')
-prob.set_val('Conduction.PEN_Conduction.height_cell',      width_total,    units='m')
-prob.set_val('Conduction.PEN_Conduction.thickness_struct', delta_pen,      units='m')
-prob.set_val('Conduction.PEN_Conduction.lambda_struct',    lambda_PEN,     units='W/m/K')
+# This standalone segment builds both a left and a right boundary link
+# (pen_right_bc='T' above), so both need the same geometry set.
+for _pen_link in ('Conduction.PEN_Conduction_left', 'Conduction.PEN_Conduction_right'):
+    prob.set_val(f'{_pen_link}.length_cell',      length_active,  units='m')
+    prob.set_val(f'{_pen_link}.height_cell',      width_total,    units='m')
+    prob.set_val(f'{_pen_link}.thickness_struct', delta_pen,      units='m')
+    prob.set_val(f'{_pen_link}.lambda_struct',    lambda_PEN,     units='W/m/K')
 
 # Conduction — IC
-prob.set_val('Conduction.IC_Conduction.length_cell',      length_active,  units='m')
-prob.set_val('Conduction.IC_Conduction.height_cell',      width_total,    units='m')
-prob.set_val('Conduction.IC_Conduction.thickness_struct', thickness_IC,   units='m')
-prob.set_val('Conduction.IC_Conduction.lambda_struct',    lambda_IC,      units='W/m/K')
-prob.set_val('Conduction.IC_Conduction.width_IC',         w_ch,           units='m')
-prob.set_val('Conduction.IC_Conduction.thickness_ch',     h_ch,           units='m')
-prob.set_val('Conduction.IC_Conduction.N_IC_walls',       2*N_channels)   # 2 side walls per channel
+for _ic_link in ('Conduction.IC_Conduction_left', 'Conduction.IC_Conduction_right'):
+    prob.set_val(f'{_ic_link}.length_cell',      length_active,  units='m')
+    prob.set_val(f'{_ic_link}.height_cell',      width_total,    units='m')
+    prob.set_val(f'{_ic_link}.thickness_struct', thickness_IC,   units='m')
+    prob.set_val(f'{_ic_link}.lambda_struct',    lambda_IC,      units='W/m/K')
+    prob.set_val(f'{_ic_link}.width_IC',         w_ch,           units='m')
+    prob.set_val(f'{_ic_link}.thickness_ch',     h_ch,           units='m')
+    prob.set_val(f'{_ic_link}.N_IC_walls',       2*N_channels)   # 2 side walls per channel
 
 # ----------------------------------------------------------------
 # Initial guesses for implicit states

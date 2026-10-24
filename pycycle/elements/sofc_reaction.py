@@ -6,7 +6,7 @@ from pycycle.thermo.cea.species_data import Properties, janaf
 
 from pycycle.flow_in import FlowIn
 
-RM = 8.3145                    # J/(mol·K)
+RM      = 8.3145                    # J/(mol·K)
 FARADAY = 96485.3321233100184  # C/mol = As/mol
 P_REF   = 101325.0             # Pa  (1 atm reference pressure for Nernst)
 

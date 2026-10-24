@@ -334,7 +334,86 @@ prob.model.set_val('passive_right.eb_pen.Qdot_conduct_right', 0.0)
 
 ---
 
-## 9. Extracting Composition in PyCycle
+## 9. Implementation Status (as of 2026-05-29)
+
+### File overview
+
+| File | Status | Key contents |
+|---|---|---|
+| `sofc_thermo_add.py` | ✅ Complete | `SOFCThermoAdd`: element-basis composition + Faraday mass update |
+| `sofc_reaction.py` | ✅ Functional | `NernstThermo`, `VoltageCalc`, `AreaSpecificResistanceOverpotential`, `CurrentDensityCalc`, `ElectroChemistry` group |
+| `sofc_balances.py` | ✅ Functional | `PENEnergyBalance`, `ICEnergyBalance`, `ChannelEnergyBalance`, `HeatConductionStructure`, `HeatConduction`, `SpeciesFlowCalc` |
+| `sofc_heat.py` | ✅ Functional | `HeatConvection`, `HeatConvectionChannel`, `HeatConvectionElectrode`, `ThermalConductivityMixture` (coefficients TBD) |
+| `sofc_observables.py` | ✅ Functional | `SpeciesFlowCalc`, `BulkComposition`, `SpeciesUtilization`, `MassSanityCheck` (stub) |
+| `sofc_segment.py` | ✅ `p.setup()` passes | `SegmentSOFC(om.Group)` — full active/passive segment |
+| `sofc_api.py` | ✅ Complete | Re-exports all classes above |
+
+### SegmentSOFC — subsystem structure
+
+```
+SegmentSOFC (om.Group)
+├── anode_rxn          SOFCThermoAdd(anode)        W_in_A, composition_in_A, I → composition_out_A, W_out_A
+├── cathode_rxn        SOFCThermoAdd(cathode)       W_in_C, composition_in_C, I → composition_out_C, W_out_C
+├── anode_thermo_out   Thermo(total_TP)             T_A_out, p_A_out → h_A_out, Cp_A_out, S_A_out, Cv_A_out
+├── cathode_thermo_out Thermo(total_TP)             T_C_out, p_C_out → h_C_out, Cp_C_out, S_C_out, Cv_C_out
+├── anode_species_out  SpeciesFlowCalc(outlet props) W_out_A → x_out_A, n_out_A
+├── cathode_species_out SpeciesFlowCalc(outlet props) W_out_C → x_out_C, n_out_C
+├── anode_bulk         BulkComposition             x_in_A, x_out_A → x_bulk_A
+├── cathode_bulk       BulkComposition             x_in_C, x_out_C → x_bulk_C
+├── Convection         HeatConvection              W_in/out_A/C, h/T in/out → Q_conv_*
+├── Conduction         HeatConduction(N_seg)       T_PEN/IC_left/right → Qc_left, Qc_right
+├── PEN                PENEnergyBalance(seg_type)  → T_PEN  (implicit)
+├── IC                 ICEnergyBalance()           → T_IC   (implicit)
+├── Cathode            ChannelEnergyBalance        → T_C_out (implicit)
+├── Anode              ChannelEnergyBalance        → T_A_out (implicit)
+│── [active only]:
+├── Electrochemistry   ElectroChemistry(N_seg)     x_H2/O2/H2O, T_PEN, I → V_cell, Qdot_chem
+└── Utilization        SpeciesUtilization          n_in_A, x_in_A, I → H2_utilization, O2_utilization
+```
+
+### Key internal wiring decisions
+
+**Composition input to outlet Thermo** — reaction output connected explicitly:
+```python
+self.connect('anode_rxn.composition_out', 'anode_thermo_out.composition')
+```
+
+**n / n_moles from Thermo** — not promoted through Thermo boundary, accessed via path:
+```python
+self.connect('anode_thermo_out.base_thermo.n',       'anode_species_out.n_i')
+self.connect('anode_thermo_out.base_thermo.n_moles', 'anode_species_out.n_moles')
+```
+
+**Scalar mole fraction extraction for Electrochemistry** — src_indices on bulk vector:
+```python
+H2_idx = anode_out_props.products.index('H2')
+self.connect('x_bulk_A', 'Electrochemistry.x_H2', src_indices=[H2_idx])
+```
+
+**Composition basis strategy** — all species calculations use outlet `Properties` basis so `x_in_A` and `x_out_A` always share the same length. `x_in_A`/`x_in_C`/`n_in_A`/`n_in_C` are external inputs; the parent SOFC Element connects the previous segment's `x_out` to the next segment's `x_in`.
+
+**HeatConvectionChannel mass flow** — uses `W_out·h_out − W_in·h_in` (not `W·Δh`) to account for O²⁻ mass transfer changing W along the channel.
+
+### Boundary variables (SegmentSOFC external interface)
+
+**Inputs from parent:**
+`W_in_A/C`, `composition_in_A/C`, `h_A/C_in`, `T_A/C_in`, `p_A/C_out`, `x_in_A/C`, `n_in_A/C`, `I` (active), `T_PEN/IC_left/right`, `N_cell`, geometric parameters
+
+**Outputs to parent:**
+`W_out_A/C`, `composition_out_A/C`, `h_A/C_out`, `T_A/C_out`, `p_A/C_out`, `x_out_A/C`, `n_out_A/C`, `T_PEN`, `T_IC`, `V_cell` (active), `H2_utilization`, `O2_utilization` (active)
+
+### Still pending
+
+- Add `NewtonSolver` + `DirectSolver` to `SegmentSOFC`
+- Wire `x_bulk_A/C` → `ThermalConductivityMixture.x1/x2` in `HeatConvection`
+- Fill `ThermalConductivityMixture` polynomial coefficients from literature
+- `InletConverter`: first-segment `x_in_A/C` from SOFC inlet Thermo (handles composition-basis mismatch at inlet)
+- Full `SOFC` Element: N-segment chain + inter-segment connections + boundary conditions
+- Fix `ICEnergyBalance` residual output pattern (move to separate ExplicitComponent)
+
+---
+
+## 10. Extracting Composition in PyCycle
 
 If using the PyCycle/CEA backend:
 

@@ -21,8 +21,20 @@ class SegmentSOFC(om.Group):
         x_in_A, x_in_C                 inlet mole fraction vectors [-]
         n_in_A, n_in_C                 inlet total molar flows [mol/s]
         I                              segment current [A]  (active only)
-        T_PEN_left, T_PEN_right        neighbor PEN temperatures [K]
-        T_IC_left,  T_IC_right         neighbor IC  temperatures [K]
+        T_PEN_left                     left-neighbor PEN temperature [K] (always present;
+                                        real neighbor state, or hardwired boundary constant)
+        T_PEN_right                    right-neighbor PEN temperature [K] (only present when
+                                        right_bc=='T' -- the last segment in a stack with a
+                                        temperature-specified right boundary)
+        T_IC_left, T_IC_right          same as above, for the IC (same left_bc/right_bc)
+        Q_cond_PEN_left, Q_cond_PEN_right   conductive PEN heat flux entering this segment
+                                        from each side [W]. Always a valid promoted name;
+                                        produced internally when the corresponding side's
+                                        bc option is 'T', otherwise a bare externally-fed
+                                        input (open/flux boundary -- defaults to 0 W/adiabatic
+                                        unless set externally, or fed by the neighboring
+                                        segment's Q_cond_PEN_left_out for an interior segment).
+        Q_cond_IC_left, Q_cond_IC_right     same as above, for the IC
         n_cell                         number of cells [-]
         (geometric parameters promoted via Conduction)
 
@@ -35,6 +47,11 @@ class SegmentSOFC(om.Group):
         x_out_A, x_out_C              outlet mole fraction vectors [-]
         n_out_A, n_out_C               outlet total molar flows [mol/s]
         T_PEN, T_IC                    solid temperatures (implicit states) [K]
+        Q_cond_PEN_left_out            PEN heat flux entering the *left neighbor* across this
+                                        segment's left link [W] (only present when
+                                        left_bc=='T', i.e. by default); the parent element
+                                        cross-wires this into that neighbor's Q_cond_PEN_right.
+        Q_cond_IC_left_out             same as above, for the IC
         V_cell                         cell voltage [V]  (active only)
         H2_utilization, O2_utilization fuel/air utilization [-]  (active only)
     """
@@ -50,6 +67,18 @@ class SegmentSOFC(om.Group):
         self.options.declare('cathode_composition',
                              desc='Element dict for cathode inlet, e.g. {"N": 0.76, "O": 0.24}')
         self.options.declare('spec', default=janaf, recordable=False)
+        self.options.declare('left_bc',  default='T', values=['T', 'Q'],
+                             desc="Boundary type shared by PEN and IC on the left face: 'T' (default, every "
+                                  "segment) builds a conduction link to T_PEN_left/T_IC_left (real neighbor "
+                                  "state, or a hardwired boundary constant for the first segment in a stack). "
+                                  "'Q': no link; Q_cond_PEN_left/Q_cond_IC_left are bare, externally-fed "
+                                  "inputs (open/flux boundary).")
+        self.options.declare('right_bc', default='Q', values=['T', 'Q'],
+                             desc="Boundary type shared by PEN and IC on the right face. 'Q' (default, "
+                                  "interior segments and flux boundaries): no link; Q_cond_PEN_right/"
+                                  "Q_cond_IC_right are bare, externally-fed inputs. 'T': build a conduction "
+                                  "link to T_PEN_right/T_IC_right (only needed by the last segment in a "
+                                  "stack for a temperature-specified boundary).")
 
     def setup(self):
         spec         = self.options['spec']
@@ -177,9 +206,11 @@ class SegmentSOFC(om.Group):
                            promotes_outputs=['Q_conv_A',     'Q_conv_C',
                                              'Q_conv_PEN_A', 'Q_conv_PEN_C',
                                              'Q_conv_IC_A',  'Q_conv_IC_C'])
-
-        self.add_subsystem('Conduction', sofc.HeatConduction(N_segments=N_seg),
-                           promotes=['*'])
+        # refactored and moved up to SOFC
+        # self.add_subsystem('Conduction', sofc.HeatConduction(N_segments=N_seg,
+        #                                                       left_bc=self.options['left_bc'],
+        #                                                       right_bc=self.options['right_bc']),
+        #                    promotes=['*'])
 
         # --- Energy balances ---
         self.add_subsystem('PEN', sofc.PENEnergyBalance(seg_type=segment_type),
@@ -187,6 +218,24 @@ class SegmentSOFC(om.Group):
 
         self.add_subsystem('IC', sofc.ICEnergyBalance(),
                            promotes=['*'])
+
+        # Diagnostic only (not consumed elsewhere in the model). Q_cond_PEN_left/right
+        # and Q_cond_IC_left/right are always valid promoted names on this segment
+        # (produced internally by Conduction's link(s), or fed externally as a bare
+        # input) regardless of the pen/ic_left/right_bc options, so these live here
+        # rather than inside Conduction.
+        self.add_subsystem('Q_conduc_left', om.ExecComp('Qc_left = Q_cond_IC_left + Q_cond_PEN_left',
+                                                        Q_cond_IC_left={'val': -1000, 'units': 'W'},
+                                                        Q_cond_PEN_left={'val': -1000, 'units': 'W'},
+                                                        Qc_left={'val': -2000, 'units': 'W'}),
+                           promotes_inputs=['Q_cond_IC_left', 'Q_cond_PEN_left'],
+                           promotes_outputs=['Qc_left'])
+        self.add_subsystem('Q_conduc_right', om.ExecComp('Qc_right = Q_cond_IC_right + Q_cond_PEN_right',
+                                                         Q_cond_IC_right={'val': 1000, 'units': 'W'},
+                                                         Q_cond_PEN_right={'val': 1000, 'units': 'W'},
+                                                         Qc_right={'val': 2000, 'units': 'W'}),
+                           promotes_inputs=['Q_cond_IC_right', 'Q_cond_PEN_right'],
+                           promotes_outputs=['Qc_right'])
 
         self.add_subsystem('Cathode', sofc.ChannelEnergyBalance(electrode='cathode'),
                            promotes_inputs=[('Q_conv_channel', 'Q_conv_C'),
@@ -257,7 +306,7 @@ class SegmentSOFC(om.Group):
         newton.options['rtol'] = 1e-4
         newton.options['atol'] = 1e-4
         newton.options['iprint'] = 2
-        newton.options['maxiter'] = 50
+        newton.options['maxiter'] = 25
         newton.options['solve_subsystems'] = True
         newton.options['max_sub_solves'] = 10
         newton.options['reraise_child_analysiserror'] = False

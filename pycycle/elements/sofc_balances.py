@@ -1,7 +1,7 @@
 import numpy as np
 
 import openmdao.api as om
-from pycycle.element_base import Element
+# from pycycle.element_base import Element unnecessary import; caused circular import error
 from pycycle.thermo.thermo import ThermoAdd
 from pycycle.thermo.cea.species_data import Properties, janaf
 from pycycle.flow_in import FlowIn
