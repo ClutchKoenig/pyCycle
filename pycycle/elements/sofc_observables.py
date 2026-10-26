@@ -35,11 +35,13 @@ class SpeciesUtilization(om.ExplicitComponent):
 
         self.add_input('n_in',   units='mol/s', desc='Total molar flow of this electrode stream')
         self.add_input('x_in',   units=None, val=np.ones(n), desc='Mole fraction vector for this stream')
-        self.add_input('I',      units='A')
-        self.add_input('n_cell', units=None)
+        self.add_input('I',      units='A', desc='Total current')
+        self.add_input('n_cell', units=None, desc='Number of cells')
 
-        self.add_output(f'{species}_utilization',  units=None)
-        self.add_output(f'{species}_consumed_mol', units='mol/s')
+        self.add_output(f'{species}_utilization',  units=None,
+                        desc=f'Fraction of inlet {species} consumed by the reaction: n_consumed / (n_in * x_{species})')
+        self.add_output(f'{species}_consumed_mol', units='mol/s',
+                        desc=f'Molar rate of {species} consumed by the reaction: I * n_cell / F')
 
         util = f'{species}_utilization'
         cons = f'{species}_consumed_mol'
@@ -90,17 +92,30 @@ class SpeciesUtilization(om.ExplicitComponent):
             J[util, 'n_in']   = -n_consumed / (n_in**2 * x_sp)
 
 class MassSanityCheck(om.ExplicitComponent):
+    """
+    Sanity check that total mass in balances total mass out across the stack:
+    total anode + cathode inlet mass flow should equal total anode + cathode
+    outlet mass flow.
+
+    NOTE: setup() declares the ports below but compute() is not yet
+    implemented, so W_res is currently never populated - this component is
+    an unfinished stub.
+    """
     def setup(self):
         self.add_input('W_in_A' , val=1.0, units='kg/s', desc='Inlet massflow W [kg/s]')
         self.add_input('W_in_C' , val=1.0, units='kg/s', desc='Inlet massflow W [kg/s]')
         self.add_input('W_out_A', val=1.0, units='kg/s', desc='Outlet massflow W [kg/s]')
         self.add_input('W_out_C', val=1.0, units='kg/s', desc='Outlet massflow W [kg/s]')
 
-        self.add_output('W_res', val=0., units='kg/s')
+        self.add_output('W_res', val=0., units='kg/s', desc='Mass imbalance residual: (W_in_A + W_in_C) - (W_out_A + W_out_C)')
 
 
 
 class BulkComposition(om.ExplicitComponent):
+    """
+    Computes the bulk (average) mole-fraction composition of a channel from
+    its inlet and outlet compositions: x_bulk = (x_in + x_out) / 2.
+    """
     def initialize(self):
         self.options.declare('thermo', desc='thermodynamic data object', recordable=False)
     def setup(self):
@@ -111,10 +126,10 @@ class BulkComposition(om.ExplicitComponent):
         self._H2Oidx = thermo.products.index('H2O') if 'H2O' in thermo.products else None
         idx = np.arange(self._n)
 
-        self.add_input('x_in', val=np.ones(self._n), units=None)
-        self.add_input('x_out',val=np.ones(self._n), units=None)
+        self.add_input('x_in', val=np.ones(self._n), units=None, desc='Mole fraction vector, channel inlet')
+        self.add_input('x_out',val=np.ones(self._n), units=None, desc='Mole fraction vector, channel outlet')
 
-        self.add_output('x_bulk', val=np.ones(self._n), units=None)
+        self.add_output('x_bulk', val=np.ones(self._n), units=None, desc='Bulk (average) mole fraction vector: (x_in + x_out) / 2')
         self.declare_partials('x_bulk', 'x_in',     rows=idx, cols=idx)
         self.declare_partials('x_bulk',  'x_out',    rows=idx, cols=idx)
 
