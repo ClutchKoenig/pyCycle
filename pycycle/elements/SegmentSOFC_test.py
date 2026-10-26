@@ -175,24 +175,17 @@ prob.set_val('Convection.IC_C.d_hyd',     d_hyd,         units='m')
 prob.set_val('Convection.IC_C.A',         A_pen_act,     units='m**2')
 prob.set_val('Convection.IC_C.A_ic_side', A_ic_side_act, units='m**2')
 
-# Conduction — PEN  (length_cell = total active length; component divides by N_seg internally)
-# This standalone segment builds both a left and a right boundary link
-# (pen_right_bc='T' above), so both need the same geometry set.
-for _pen_link in ('Conduction.PEN_Conduction_left', 'Conduction.PEN_Conduction_right'):
-    prob.set_val(f'{_pen_link}.length_cell',      length_active,  units='m')
-    prob.set_val(f'{_pen_link}.height_cell',      width_total,    units='m')
-    prob.set_val(f'{_pen_link}.thickness_struct', delta_pen,      units='m')
-    prob.set_val(f'{_pen_link}.lambda_struct',    lambda_PEN,     units='W/m/K')
-
-# Conduction — IC
-for _ic_link in ('Conduction.IC_Conduction_left', 'Conduction.IC_Conduction_right'):
-    prob.set_val(f'{_ic_link}.length_cell',      length_active,  units='m')
-    prob.set_val(f'{_ic_link}.height_cell',      width_total,    units='m')
-    prob.set_val(f'{_ic_link}.thickness_struct', thickness_IC,   units='m')
-    prob.set_val(f'{_ic_link}.lambda_struct',    lambda_IC,      units='W/m/K')
-    prob.set_val(f'{_ic_link}.width_IC',         w_ch,           units='m')
-    prob.set_val(f'{_ic_link}.thickness_ch',     h_ch,           units='m')
-    prob.set_val(f'{_ic_link}.N_IC_walls',       2*N_channels)   # 2 side walls per channel
+# Segment size and conduction geometry (shared by the left and right links, right_bc='T' above).
+prob.set_val('length_seg',    seg_len_act,   units='m')
+prob.set_val('A_seg',         width_total * seg_len_act, units='m**2')   # active area of the segment
+prob.set_val('height_cell',   width_total,   units='m')
+prob.set_val('thickness_PEN', delta_pen,     units='m')
+prob.set_val('lambda_PEN',    lambda_PEN,    units='W/m/K')
+prob.set_val('thickness_IC',  thickness_IC,  units='m')
+prob.set_val('lambda_IC',     lambda_IC,     units='W/m/K')
+prob.set_val('width_IC',      w_ch,          units='m')
+prob.set_val('height_ch',     h_ch,          units='m')
+prob.set_val('N_IC_walls',    2*N_channels)   # 2 side walls per channel
 
 # ----------------------------------------------------------------
 # Initial guesses for implicit states
