@@ -5,7 +5,27 @@ from pycycle.thermo.cea.species_data import Properties, janaf
 
 class HeatConvection(om.Group):
     """
-    Group that handles convective heat transfer of all kinds.
+    Group that handles convective heat transfer of all kinds: channel-gas
+    enthalpy rise, PEN/IC wall-to-gas convection, and the gas-mixture thermal
+    conductivities those convection calculations depend on.
+
+    Inputs
+    ------
+    W_in_A, W_in_C     : kg/s  anode/cathode channel inlet mass flows
+    W_out_A, W_out_C   : kg/s  anode/cathode channel outlet mass flows
+    h_A_in, h_C_in     : J/kg  anode/cathode channel inlet enthalpies
+    h_A_out, h_C_out   : J/kg  anode/cathode channel outlet enthalpies
+    T_A_in, T_C_in     : K     anode/cathode channel inlet temperatures
+    T_A_out, T_C_out   : K     anode/cathode channel outlet temperatures
+    T_PEN, T_IC        : K     PEN/IC structure temperatures (outlet side)
+
+    Outputs
+    -------
+    Q_conv_A, Q_conv_C             : W  channel-gas enthalpy rise (anode/cathode)
+    Q_conv_PEN_A, Q_conv_PEN_C     : W  convective heat PEN <-> anode/cathode channel
+    Q_conv_IC_A, Q_conv_IC_C       : W  convective heat IC  <-> anode/cathode channel
+    lambda_A, lambda_C             : W/m/K  anode/cathode gas-mixture thermal conductivity
+    T_bulk_A, T_bulk_C             : K  bulk mixture temperature (anode/cathode)
     """
     #def initialize(self):
         #self.options.declare('N_seg', default=10)
@@ -73,11 +93,12 @@ class HeatConvection(om.Group):
 
 class HeatConvectionChannel(om.ExplicitComponent):
     """
-    Class responsible for calculating the convective heat transfer 
+    Class responsible for calculating the convective heat transfer
     inside the Anode or Cathode flow channels. I.e. handles:
         - Anode or Cathode heat convection.
 
-    Outputs Q_conv_anode [W] or Q_conv_cathode [W]
+    Outputs Q_conv_ch [W]: enthalpy flux absorbed by the channel gas,
+    Q_conv_ch = W_out * h_out - W_in * h_in
 
     Options
     -------
@@ -86,12 +107,12 @@ class HeatConvectionChannel(om.ExplicitComponent):
     def initialize(self):
         self.options.declare('electrode', values=['anode', 'cathode'])
     def setup(self):
-        self.add_input('W_in', units='kg/s',   desc= 'Mass flow of channel')
-        self.add_input('h_in',      units='J/kg', )
-        self.add_input('h_out',     units='J/kg')
-        self.add_input('W_out', units='kg/s')
+        self.add_input('W_in', units='kg/s',   desc='Mass flow of channel, inlet')
+        self.add_input('h_in',      units='J/kg', desc='Specific enthalpy of channel gas, inlet')
+        self.add_input('h_out',     units='J/kg', desc='Specific enthalpy of channel gas, outlet')
+        self.add_input('W_out', units='kg/s', desc='Mass flow of channel, outlet')
 
-        self.add_output('Q_conv_ch', units='W')
+        self.add_output('Q_conv_ch', units='W', desc='Enthalpy flux absorbed by channel gas: W_out*h_out - W_in*h_in')
         self.declare_partials('Q_conv_ch', ['W_in', 'W_out', 'h_in', 'h_out'])
 
     def compute(self, inputs, outputs):
@@ -123,7 +144,7 @@ class HeatConvectionElectrode(om.ExplicitComponent):
         self.options.declare('structure', values=['PEN', 'IC'])
 
     def setup(self):
-        self.add_input('T_channel_in',  units='K')
+        self.add_input('T_channel_in',  units='K', desc='Inlet temperature of channel mixture')
         self.add_input('T_channel_out', units='K',      desc='Outlet temperature of channel mixture - result of Implicit calculation in EnergyBalance()')
         self.add_input('T_struc_out',   units='K',      desc='Outlet temperature of either PEN or IC')
 
@@ -242,7 +263,7 @@ class ThermalConductivityMixture(om.ExplicitComponent):
                             'E':   -0.00104e-15}
             
             #[A,B,C,D,E]
-            lambda_coeff2 = {'a2': -0.0086593279, 'b2': 0.0000747671, 'c2': 0.0000000294}
+            lambda_coeff2 = {'a2': 0.0000000294, 'b2': 0.0000747671, 'c2': -0.0086593279}
 
             eta_coeff2 = {'A':   -3.01414856711936e-06,
                           'B':    4.076228959276e-08}
@@ -299,8 +320,8 @@ class ThermalConductivityMixture(om.ExplicitComponent):
                             'E':   -0.00104e-15}
             
             #[A,B,C,D,E]
-            lambda_coeff2 = {'a2': -0.0086593279, 'b2': 0.0000747671, 'c2': 0.0000000294}
-
+            lambda_coeff2 = {'a2': 0.0000000294, 'b2': 0.0000747671, 'c2': -0.0086593279}
+            # order of lambdda coefficients used to be lowest to highest order, which was wrong and resulted in error
             eta_coeff2 = {'A':   -3.01414856711936e-06,
                           'B':    4.076228959276e-08}
             
@@ -365,12 +386,12 @@ class HeatConductionStructure(om.ExplicitComponent):
     Lateral heat conduction (along flow direction) through the PEN or IC
     structure between two adjacent segments.
 
-    Fourier (PEN, single cross-section):
-        Q = lambda * (h_cell * delta) * n_cell * (N_seg / l_cell) * dT
+    Fourier (PEN, single cross-section), dx = length_seg:
+        Q = lambda * (h_cell * delta) * n_cell / dx * dT
 
     Fourier (IC, two cross-sections in series per Simulink):
-        R1 = (l_cell/N_seg) / (lambda * h_cell * delta * n_cell)
-        R2 = (l_cell/N_seg) / (lambda * width_IC * delta_ch * n_cell * N_IC_walls)
+        R1 = dx / (lambda * h_cell * delta * n_cell)
+        R2 = dx / (lambda * width_IC * h_ch * n_cell * N_IC_walls)
         Q  = dT / (R1 + R2)
 
     Sign convention (consistent with energy balance):
@@ -381,19 +402,16 @@ class HeatConductionStructure(om.ExplicitComponent):
     Options
     -------
     structure  : 'PEN' | 'IC'
-    N_segments : int   number of discretisation segments (default 10)
     """
-    # TODO: check if partials are setup correctly!!!!
     def initialize(self):
         self.options.declare('structure', values=['PEN', 'IC'])
-        self.options.declare('N_segments', default=10, desc='Number of discretisation segments')
 
     def setup(self):
         struct = self.options['structure']
 
         self.add_input('T_cell_left',      val=1000.0, units='K',     desc='Temperature of left-neighbour segment')
         self.add_input('T_cell_right',     val=1000.0, units='K',     desc='Temperature of right-neighbour segment')
-        self.add_input('length_cell',      val=0.1,    units='m',     desc='Total active cell length')
+        self.add_input('length_seg',       val=0.01,   units='m',     desc='Segment length along the flow (conduction distance dx)')
         self.add_input('height_cell',      val=0.1,    units='m',     desc='Cell height (conduction cross-section)')
         self.add_input('thickness_struct', val=2e-4,   units='m',     desc='Thickness of PEN or IC layer')
         self.add_input('lambda_struct',    val=2.0,    units='W/m/K', desc='Thermal conductivity of PEN or IC')
@@ -401,39 +419,37 @@ class HeatConductionStructure(om.ExplicitComponent):
 
         if struct == 'IC':
             self.add_input('width_IC',    val=1e-3, units='m',  desc='IC channel width')
-            self.add_input('thickness_ch',val=1e-3, units='m',  desc='Channel height (IC side-wall area)')
+            self.add_input('height_ch',   val=1e-3, units='m',  desc='Channel height (IC side-wall area)')
             self.add_input('N_IC_walls',  val=2.0,  units=None, desc='Number of IC side-wall faces per channel')
 
         self.add_output('Q_right', val=0.0, units='W', desc='Heat flux into right-neighbour segment')
         self.add_output('Q_left',  val=0.0, units='W', desc='Heat flux into left-neighbour segment')
 
-        common = ['T_cell_left', 'T_cell_right', 'length_cell', 'height_cell',
+        common = ['T_cell_left', 'T_cell_right', 'length_seg', 'height_cell',
                   'thickness_struct', 'lambda_struct', 'n_cell']
-        active = common + (['width_IC', 'thickness_ch', 'N_IC_walls'] if struct == 'IC' else [])
+        active = common + (['width_IC', 'height_ch', 'N_IC_walls'] if struct == 'IC' else [])
 
         self.declare_partials('Q_right', active)
         self.declare_partials('Q_left',  active)
 
     def compute(self, inputs, outputs):
         struct     = self.options['structure']
-        N          = self.options['N_segments']
         dT         = inputs['T_cell_left'] - inputs['T_cell_right']
-        l_cell     = inputs['length_cell']
+        dx         = inputs['length_seg']
         h_cell     = inputs['height_cell']
         delta      = inputs['thickness_struct']
         lambda_str = inputs['lambda_struct']
         n_cell     = inputs['n_cell']
-        dx         = l_cell / N  # segment length
 
         if struct == 'PEN':
             A = h_cell * delta
             Q = lambda_str * A * n_cell / dx * dT
         else:
             width_IC  = inputs['width_IC']
-            delta_ch  = inputs['thickness_ch']
+            h_ch      = inputs['height_ch']
             n_walls   = inputs['N_IC_walls']
             A1 = h_cell * delta
-            A2 = width_IC * delta_ch
+            A2 = width_IC * h_ch
             R1 = dx / (lambda_str * A1 * n_cell)
             R2 = dx / (lambda_str * A2 * n_cell * n_walls)
             Q  = dT / (R1 + R2)
@@ -443,14 +459,12 @@ class HeatConductionStructure(om.ExplicitComponent):
 
     def compute_partials(self, inputs, J):
         struct     = self.options['structure']
-        N          = self.options['N_segments']
         dT         = inputs['T_cell_left'] - inputs['T_cell_right']
-        l_cell     = inputs['length_cell']
+        dx         = inputs['length_seg']
         h_cell     = inputs['height_cell']
         delta      = inputs['thickness_struct']
         lambda_str = inputs['lambda_struct']
         n_cell     = inputs['n_cell']
-        dx         = l_cell / N
 
         if struct == 'PEN':
             A = h_cell * delta
@@ -462,15 +476,15 @@ class HeatConductionStructure(om.ExplicitComponent):
             dQ_ddelta  = lambda_str * h_cell * n_cell / dx * dT
             dQ_dlambda = A * n_cell / dx * dT
             dQ_dn      = lambda_str * A / dx * dT
-            dQ_dl      = -lambda_str * A * n_cell * N / l_cell**2 * dT  # dx=l/N → G~N/l
+            dQ_ddx     = -G * dT / dx   # G ~ 1/dx
 
         else:
             width_IC  = inputs['width_IC']
-            delta_ch  = inputs['thickness_ch']
+            h_ch      = inputs['height_ch']
             n_walls   = inputs['N_IC_walls']
 
             A1      = h_cell * delta
-            A2      = width_IC * delta_ch
+            A2      = width_IC * h_ch
             R1      = dx / (lambda_str * A1 * n_cell)
             R2      = dx / (lambda_str * A2 * n_cell * n_walls)
             R_total = R1 + R2
@@ -487,9 +501,9 @@ class HeatConductionStructure(om.ExplicitComponent):
             dQ_ddelta  = dQ_dR * (-R1 / delta)
             dQ_dlambda = dQ_dR * (-(R1 + R2) / lambda_str)
             dQ_dn      = dQ_dR * (-(R1 + R2) / n_cell)
-            dQ_dl      = dQ_dR * ( (R1 + R2) / l_cell)  # dx=l/N → R~l → ∂R/∂l = R/l
+            dQ_ddx     = dQ_dR * ( (R1 + R2) / dx)  # R ~ dx → ∂R/∂dx = R/dx
             dQ_dwidth  = dQ_dR * (-R2 / width_IC)
-            dQ_dch     = dQ_dR * (-R2 / delta_ch)
+            dQ_dch     = dQ_dR * (-R2 / h_ch)
             dQ_dnwalls = dQ_dR * (-R2 / n_walls)
 
         # Q_right = +Q → same sign; Q_left = -Q → flipped sign
@@ -500,96 +514,111 @@ class HeatConductionStructure(om.ExplicitComponent):
             J[out, 'thickness_struct'] = sign * dQ_ddelta
             J[out, 'lambda_struct']    = sign * dQ_dlambda
             J[out, 'n_cell']           = sign * dQ_dn
-            J[out, 'length_cell']      = sign * dQ_dl
+            J[out, 'length_seg']       = sign * dQ_ddx
             if struct == 'IC':
                 J[out, 'width_IC']     = sign * dQ_dwidth
-                J[out, 'thickness_ch'] = sign * dQ_dch
+                J[out, 'height_ch']    = sign * dQ_dch
                 J[out, 'N_IC_walls']   = sign * dQ_dnwalls
 
 
 class HeatConduction(om.Group):
     """
-    Organizes the lateral (flow-direction) heat conduction of the IC and PEN.
+    Organizes the lateral (flow-direction) heat conduction of the IC and PEN
+    for one segment. PEN and IC always take the same boundary type on a given
+    face (they can still have different geometry/temperature/flux values).
 
-    Each segment builds at most one conduction "link" per side, shared by both
-    structures (PEN and IC always take the same boundary type on a given
-    face; they can still have different geometry/temperature/flux values):
+    Each interface between two segments is computed exactly once, by the
+    segment on its right (that segment's left link):
 
-    - Left link (``left_bc == 'T'``, the default for every segment): one
-      ``HeatConductionStructure`` per structure, between the left neighbour's
-      temperature (``T_PEN_left``/``T_IC_left`` — a real neighbour state, or a
-      hardwired boundary constant for the very first segment) and *this
-      segment's own* ``T_PEN``/``T_IC``. Its two signed halves are:
-        * ``Q_PEN_left``      — heat entering *this* segment (feeds this
-          segment's own energy balance, as before).
-        * ``Q_PEN_left_out``  — heat entering the *left neighbour* across
-          the same link (new; the parent element cross-wires this into the
-          left neighbour's ``Q_PEN_right`` instead of recomputing it).
-      When ``left_bc == 'Q'`` (open, flux-specified boundary): no link is
-      built here; ``Q_PEN_left``/``Q_IC_left`` remain bare inputs on
-      ``PENEnergyBalance``/``ICEnergyBalance`` (defaulting to 0 W / adiabatic;
-      set a nonzero flux externally with ``prob.set_val(...)`` if needed).
+    Left face (``left_bc``):
+      'T'  link between the left neighbour's temperature ``T_PEN_left``/
+           ``T_IC_left`` (real neighbour state, or a hardwired boundary
+           temperature for the first segment) and this segment's own
+           ``T_PEN``/``T_IC``. Outputs:
+             ``Q_PEN_left``      heat entering this segment
+             ``Q_PEN_left_out``  heat entering the left neighbour across the
+                                 same link (wired by the parent element into
+                                 that neighbour's right-face flux)
+      'Q'  flux boundary: ``Q_PEN_left``/``Q_IC_left`` = inputs
+           ``Q_PEN_BC_left``/``Q_IC_BC_left`` (default 0 W = adiabatic).
 
-    - Right link (``right_bc == 'T'``): mirrored, only ever needed by the
-      last segment in a stack (every interior segment relies on its right
-      neighbour's left link instead — see above). Produces
-      ``Q_PEN_right``/``Q_IC_right`` only; the other half is unused
-      (no segment beyond the last one). Default ``right_bc == 'Q'``: no link;
-      the bare input is fed either by the next segment's
-      ``Q_PEN_left_out`` (interior) or defaults to 0 W (true right
-      boundary).
+    Right face (``right_bc``):
+      'T'          link to a hardwired ``T_PEN_right``/``T_IC_right`` (last
+                   segment of a stack); outputs ``Q_PEN_right``/``Q_IC_right``.
+      'Q'          flux boundary: ``Q_PEN_right``/``Q_IC_right`` = inputs
+                   ``Q_PEN_BC_right``/``Q_IC_BC_right`` (default 0 W = adiabatic).
+      'neighbour'  interior face: nothing is built; the right-face flux is the
+                   right neighbour's ``Q_PEN_left_out``/``Q_IC_left_out``.
 
-    Prior to this, a single component per segment computed one flux directly
-    between the *two neighbours'* temperatures (never involving this
-    segment's own state), and both signed halves were fed back into this same
-    segment's own balance — which always canceled to net zero regardless of
-    temperature, so lateral conduction never actually affected any segment's
-    PEN/IC temperature. This restructuring computes each interface's flux
-    exactly once, anchored to the real state on each side.
+    The conduction distance of every link is this segment's length,
+    ``length_seg``.
     """
     def initialize(self):
-        self.options.declare('N_segments', default=10)
         self.options.declare('left_bc',  default='T', values=['T', 'Q'],
-                             desc="Boundary type shared by PEN and IC on the left face: 'T' builds a "
-                                  "conduction link to T_PEN_left/T_IC_left; 'Q' leaves Q_PEN_left/"
-                                  "Q_IC_left as bare, externally-fed inputs.")
-        self.options.declare('right_bc', default='', values=['T', 'Q'],
-                             desc='Same as left_bc, for the right face.')
+                             desc="Left face: 'T' conduction link to T_PEN_left/T_IC_left, "
+                                  "'Q' flux boundary from Q_PEN_BC_left/Q_IC_BC_left.")
+        self.options.declare('right_bc', default='Q', values=['T', 'Q', 'neighbour'],
+                             desc="Right face: 'T' conduction link to T_PEN_right/T_IC_right, "
+                                  "'Q' flux boundary from Q_PEN_BC_right/Q_IC_BC_right, "
+                                  "'neighbour' interior face fed by the right neighbour.")
 
     def setup(self):
-        N_segments = self.options['N_segments']
+        left_bc  = self.options['left_bc']
+        right_bc = self.options['right_bc']
 
-        if self.options['left_bc'] == 'T':
+        if left_bc == 'T':
             self.add_subsystem('IC_Conduction_left',
-                               HeatConductionStructure(structure='IC', N_segments=N_segments),
+                               HeatConductionStructure(structure='IC'),
                                promotes_inputs=[('T_cell_left',  'T_IC_left'),
                                                 ('T_cell_right', 'T_IC'),
-                                                'length_cell', 'height_cell',
-                                                'thickness_struct', 'lambda_struct',
-                                                'n_cell'],
+                                                'length_seg', 'height_cell',
+                                                ('thickness_struct', 'thickness_IC'),
+                                                ('lambda_struct', 'lambda_IC'),
+                                                'n_cell', 'width_IC', 'height_ch', 'N_IC_walls'],
                                promotes_outputs=[('Q_right', 'Q_IC_left'),
                                                  ('Q_left',  'Q_IC_left_out')])
             self.add_subsystem('PEN_Conduction_left',
-                               HeatConductionStructure(structure='PEN', N_segments=N_segments),
+                               HeatConductionStructure(structure='PEN'),
                                promotes_inputs=[('T_cell_left',  'T_PEN_left'),
-                                                ('T_cell_right', 'T_PEN')],  #TODO: promote geometric parameters
+                                                ('T_cell_right', 'T_PEN'),
+                                                'length_seg', 'height_cell',
+                                                ('thickness_struct', 'thickness_PEN'),
+                                                ('lambda_struct', 'lambda_PEN'),
+                                                'n_cell'],
                                promotes_outputs=[('Q_right', 'Q_PEN_left'),
                                                  ('Q_left',  'Q_PEN_left_out')])
+        else:
+            self.add_subsystem('BC_left', om.ExecComp(['Q_PEN_left = Q_PEN_BC_left',
+                                                       'Q_IC_left = Q_IC_BC_left'],
+                                                      Q_PEN_left={'units': 'W'}, Q_PEN_BC_left={'units': 'W', 'val': 0.0},
+                                                      Q_IC_left={'units': 'W'},  Q_IC_BC_left={'units': 'W', 'val': 0.0}),
+                               promotes=['*'])
 
-        if self.options['right_bc'] == 'T':
+        if right_bc == 'T':
             self.add_subsystem('IC_Conduction_right',
-                               HeatConductionStructure(structure='IC', N_segments=N_segments),
+                               HeatConductionStructure(structure='IC'),
                                promotes_inputs=[('T_cell_left',  'T_IC'),
                                                 ('T_cell_right', 'T_IC_right'),
-                                                'length_cell', 'height_cell',
-                                                'thickness_struct', 'lambda_struct',
-                                                'n_cell'],
+                                                'length_seg', 'height_cell',
+                                                ('thickness_struct', 'thickness_IC'),
+                                                ('lambda_struct', 'lambda_IC'),
+                                                'n_cell', 'width_IC', 'height_ch', 'N_IC_walls'],
                                promotes_outputs=[('Q_left', 'Q_IC_right')])
             self.add_subsystem('PEN_Conduction_right',
-                               HeatConductionStructure(structure='PEN', N_segments=N_segments),
+                               HeatConductionStructure(structure='PEN'),
                                promotes_inputs=[('T_cell_left',  'T_PEN'),
-                                                ('T_cell_right', 'T_PEN_right')],
+                                                ('T_cell_right', 'T_PEN_right'),
+                                                'length_seg', 'height_cell',
+                                                ('thickness_struct', 'thickness_PEN'),
+                                                ('lambda_struct', 'lambda_PEN'),
+                                                'n_cell'],
                                promotes_outputs=[('Q_left', 'Q_PEN_right')])
+        elif right_bc == 'Q':
+            self.add_subsystem('BC_right', om.ExecComp(['Q_PEN_right = Q_PEN_BC_right',
+                                                        'Q_IC_right = Q_IC_BC_right'],
+                                                       Q_PEN_right={'units': 'W'}, Q_PEN_BC_right={'units': 'W', 'val': 0.0},
+                                                       Q_IC_right={'units': 'W'},  Q_IC_BC_right={'units': 'W', 'val': 0.0}),
+                               promotes=['*'])
 
         self.linear_solver = om.LinearRunOnce()
 
