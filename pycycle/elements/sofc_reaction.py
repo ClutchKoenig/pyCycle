@@ -25,6 +25,14 @@ class NernstThermo(om.ExplicitComponent):
 
     The net heat deposited in the PEN is: Qdot_chem - V_cell·I = (V_tn - V_cell)·I
 
+    Species exchange with the gas channels (n = I/(2F), enthalpies at T):
+    Q_species_A = n·(h_H2O - h_H2)    absolute enthalpy entering the anode gas
+    Q_species_C = -0.5·n·h_O2         absolute enthalpy entering the cathode gas
+    Q_species_A + Q_species_C = n·ΔH(T) = -Qdot_chem. The channel energy balances
+    use absolute (formation-inclusive) enthalpies, so they must include these
+    terms; otherwise the reaction enthalpy shows up both as the PEN source
+    Qdot_chem and as an enthalpy drop of the gas, i.e. it is counted twice.
+
     Options
     -------
     spec : janaf-style thermo data module (default: janaf)
@@ -53,6 +61,10 @@ class NernstThermo(om.ExplicitComponent):
         self.add_output('E_Nernst',  val=1.0,  units='V', desc='Nernst voltage with concentration correction')
         self.add_output('V_tn',      val=1.25, units='V', desc='Thermoneutral voltage -ΔH°/(2F)')
         self.add_output('Qdot_chem', val=0.0,  units='W', desc='Total reaction enthalpy rate V_tn·I')
+        self.add_output('Q_species_A', val=0.0, units='W',
+                        desc='Absolute enthalpy entering the anode gas with the exchanged species: n·(h_H2O - h_H2)')
+        self.add_output('Q_species_C', val=0.0, units='W',
+                        desc='Absolute enthalpy entering the cathode gas with the exchanged species: -0.5·n·h_O2')
 
         self.declare_partials('*', '*', method='cs')
 
@@ -79,6 +91,11 @@ class NernstThermo(om.ExplicitComponent):
         outputs['E_Nernst']  = outputs['E_OCV'] + (RM * T / (2.0 * FARADAY)) * np.log(
                                     x_H2 * np.sqrt(x_O2 * P / P_REF) / x_H2O)
         outputs['Qdot_chem'] = outputs['V_tn'] * I
+
+        n_H2 = I / (2.0 * FARADAY)    # mol/s H2 consumed = H2O produced = 2x O2 consumed
+        h = H0 * RM * T               # J/mol absolute species enthalpies at T
+        outputs['Q_species_A'] = n_H2 * (h[self._idx_H2O] - h[self._idx_H2])
+        outputs['Q_species_C'] = -0.5 * n_H2 * h[self._idx_O2]
 
 class VoltageCalc(om.ExplicitComponent):
     """
@@ -116,8 +133,8 @@ class AreaSpecificResistanceOverpotential(om.ExplicitComponent):
         self.add_input('T_PEN',     val=1001.9, units='K', desc='Temperature at and in the electrochemical active area')
         self.add_input('T_ref_asr', val=800,    units='K', desc='Reference Temperature at which Correlation of ASR is calibrated with')
         self.add_input('E_a_asr',   val=0.2,       units='V', desc='Reference activation energy')
-        self.add_input('R_ref_asr', val=1.0,    units='ohm',      desc='Reference asr resistance')
-        self.add_input('R_c_asr',   val=1.0,    units='ohm',      desc='Reference asr resistance')
+        self.add_input('R_ref_asr', val=1.0,    units='ohm',      desc='Reference asr resistance (Arrhenius pre-exponential term)')
+        self.add_input('R_c_asr',   val=1.0,    units='ohm',      desc='Constant (temperature-independent) contact resistance term, added to the Arrhenius term')
         self.add_input('ASR_nom_750',val=1e-4,  units='ohm*m**2', desc='Nominal ASR at 750 C')
         self.add_input('i',         val=1.0,    units='A/m**2',   desc='Current density')
         # Einheiten inkonsistent? Was hat ASR_nom für ne Einheit?
@@ -181,7 +198,7 @@ class NernstPotential(om.ExplicitComponent):
         self.add_input('T', val=1000., units='K', desc= 'Temperature')
 
         self.add_input('p0', val=10e5, units='Pa', desc='static pressure of flow')
-        self.add_input('p_fuel', val=10e5, units='Pa', desc='static pressure of fuel flow')
+        self.add_input('p_fuel', val=10e5, units='Pa', desc='static pressure of fuel flow (currently unused - not referenced in compute()/compute_partials())')
         self.add_input('p_air', val=10e5, units='Pa', desc='static pressure of air flow')
 
         self.add_input('a_H2', val=0.5, units=None, desc='Activity of H2')
@@ -307,71 +324,60 @@ class SpeciesPartialPressure(om.ExplicitComponent):
 
 class CurrentDensityCalc(om.ExplicitComponent):
     """
-    Computes current density i = I / (A / N_seg) = I * N_seg / A
+    Computes current density i = I / A_seg
 
     Inputs:
-        I     : Total current [A]
-        A     : Cross-sectional area [m**2]
-        N_seg : Number of segments [-] (integer constant, default=8)
+        I     : Segment current [A]
+        A_seg : Active area of this segment [m**2]
 
     Output:
         i     : Current density [A/m**2]
     """
-    def initialize(self):
-        self.options.declare('N_seg', default=10)
-
     def setup(self):
         self.add_input('I', val=100,    units='A',      desc='Current in the segment. Only > 0 for active segments')
-        self.add_input('A', val=0.01,   units='m**2',   desc='Cross-sectional area of current flux - perpendicular to FLow direction') # promote input
+        self.add_input('A_seg', val=1e-3, units='m**2', desc='Active area of this segment (current flux perpendicular to flow direction)')
 
-        
         self.add_output('i', val=1.0, units='A/m**2', desc='Current density in segment')
-        self.declare_partials('i', ['I','A'])
+        self.declare_partials('i', ['I', 'A_seg'])
 
     def compute(self, inputs, outputs):
-        I = inputs['I']
-        A = inputs['A']
-        N_seg = self.options['N_seg']
-        outputs['i'] = I / (A / N_seg)
+        outputs['i'] = inputs['I'] / inputs['A_seg']
 
     def compute_partials(self, inputs, J):
         I = inputs['I']
-        A = inputs['A']
-        N_seg = self.options['N_seg']
-        J['i', 'I'] = N_seg / A
-        J['i', 'A'] = - N_seg * I / (A**2 )
+        A_seg = inputs['A_seg']
+        J['i', 'I']     = 1.0 / A_seg
+        J['i', 'A_seg'] = -I / A_seg**2
         
 
 class ElectroChemistry(om.Group):
     """
-    Assembly that models the electrochemical calculations
-    -------------
-    Design
-    -------------
-        inputs
-        --------
-        T
-        p
+    Assembly that models the electrochemical calculations for one segment:
+    current density -> ASR overpotential -> Nernst voltage -> cell voltage.
 
-        x_h2_in
-        x_h2_out
-        
-        x_o2_in
-        x_o2_out
+    Inputs
+    ------
+    I          : A       segment current
+    A_seg      : m**2    active area of this segment
+    T_PEN      : K       PEN temperature (reaction/ASR temperature)
+    P_cat      : Pa      cathode-side pressure
+    x_H2       : None    H2 mole fraction at anode TPB
+    x_O2       : None    O2 mole fraction at cathode TPB
+    x_H2O      : None    H2O mole fraction at anode TPB
 
-
-        outputs
-        --------
-        V_cell
-        ASR
-        E_nernst
+    Outputs
+    -------
+    i          : A/m**2  current density
+    ASR        : ohm*m**2  area specific resistance
+    eta_asr    : V       ASR overpotential
+    U_Nernst   : V       Nernst voltage with concentration correction
+    U_OCV      : V       open-circuit (standard Nernst) voltage
+    Qdot_chem  : W       total reaction enthalpy rate
+    V_cell     : V       cell voltage (U_Nernst - eta_asr)
     """
-    def initialize(self):
-        self.options.declare('N_segments', default=10)
     def setup(self):
-        N_seg = self.options['N_segments']
-        self.add_subsystem('current_density', CurrentDensityCalc(N_seg=N_seg),
-                           promotes_inputs=['I', 'A'],
+        self.add_subsystem('current_density', CurrentDensityCalc(),
+                           promotes_inputs=['I', 'A_seg'],
                            promotes_outputs=['i'])
 
         self.add_subsystem('ASR', AreaSpecificResistanceOverpotential(),
@@ -383,7 +389,8 @@ class ElectroChemistry(om.Group):
                                             ('x_H2'),
                                             ('x_O2'),
                                             ('x_H2O')],
-                           promotes_outputs=[('E_Nernst', 'U_Nernst'), ('E_OCV', 'U_OCV'), 'Qdot_chem'])
+                           promotes_outputs=[('E_Nernst', 'U_Nernst'), ('E_OCV', 'U_OCV'), 'Qdot_chem',
+                                             'Q_species_A', 'Q_species_C'])
         
         self.add_subsystem('voltage', VoltageCalc(),
                            promotes=['*'])
