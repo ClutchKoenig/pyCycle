@@ -1,0 +1,3 @@
+[submodule "pycycle/elements/sofc"]
+	path = pycycle/elements/sofc
+	url = https://github.com/ClutchKoenig/sofc_pycycle.git
