@@ -1,6 +1,6 @@
 import openmdao.api as om
 from pycycle.element_base import Element
-from pycycle.sofc_api import SOFCThermoAdd, SegmentSOFC, HeatConductionStructure
+from pycycle.sofc_api import SOFCThermoAdd, SegmentSOFC
 from pycycle.flow_in import FlowIn
 import numpy as np
 from pycycle.thermo.thermo import Thermo
@@ -12,11 +12,61 @@ import pycycle.sofc_api as sofc
 
 class SOFC(Element):
     """
-    Full SOFC-Model
-    ------------------------------------------------
-    Inputs:
-        I                   Total current
+    Full SOFC-Model: N_passive + N_active + N_passive SegmentSOFC
+    segments (anode/cathode flow, PEN/IC energy balances, electrochemistry)
+    enforces an equipotential condition
+    (every active segment shares one terminal voltage, solved so that the
+    sum of segment currents matches the total stack current).
 
+    Boundary variables promoted to element level
+    ----------------------------------------------
+    Inputs:
+        Fl_I_an:tot:T, Fl_I_an:tot:P           anode inlet temperature/pressure [K]/[Pa]
+        Fl_I_an:tot:composition                anode inlet element composition [mol/g]
+        Fl_I_an:stat:W                         anode inlet mass flow [kg/s]
+        Fl_I_cat:tot:T, Fl_I_cat:tot:P         cathode inlet temperature/pressure [K]/[Pa]
+        Fl_I_cat:tot:composition               cathode inlet element composition [mol/g]
+        Fl_I_cat:stat:W                        cathode inlet mass flow [kg/s]
+        I                                       total stack current [A] (promoted from
+                                                 U_balance.rhs:U_cell)
+        n_cell                                  number of cells (shared across active segments) [-]
+        length_seg_active, length_seg_passive   length of one active / passive segment along the
+                                                 flow (conduction distance dx) [m]
+        A_seg_active                            active area of one active segment (current
+                                                 density i = I_seg / A_seg_active) [m**2]
+        height_cell, n_cell,
+        thickness_PEN, lambda_PEN,
+        thickness_IC, lambda_IC,
+        width_IC, height_ch, N_IC_walls          PEN/IC conduction geometry, shared by every
+                                                 segment's Conduction group
+
+    Outputs:
+        Fl_O_an:tot:*, Fl_O_an:stat:W           anode outlet flow station (h/S/Cp/Cv/T/P, composition, W)
+        Fl_O_cat:tot:*, Fl_O_cat:stat:W         cathode outlet flow station (h/S/Cp/Cv/T/P, composition, W)
+        U_cell                                  shared terminal voltage across all active
+                                                 segments, solved by the equipotential balance [V]
+        P_el                                    stack electrical power U_cell * I * n_cell [W]
+        H2_utilization_stack,
+        O2_utilization_stack                    fuel/oxygen utilization relative to the stack
+                                                 inlet flows [-]
+
+    Options
+    -------
+    N_active, N_passive                     number of active/passive segments (N_passive segments
+                                             are placed on both the inlet and outlet side)
+    in_composition_anode/cathode            inlet element-basis composition dicts, used as a
+                                             fallback when no upstream element sets Fl_I_data
+    thermo_data                             CEA thermo spec (default janaf)
+    BC_type_left, BC_type_right              'T' or 'Q' boundary type for the stack's two open
+                                             faces (segment0's left face, segments[-1]'s right face)
+    T_PEN_BC_left, T_IC_BC_left               hardwired PEN/IC temperatures on the open left face,
+                                             used when BC_type_left=='T' [K]
+    T_PEN_BC_right, T_IC_BC_right             same, for the open right face (BC_type_right=='T') [K]
+    Q_cond_PEN_left, Q_cond_IC_left           hardwired heat flux into the open left face,
+                                             used when BC_type_left=='Q' [W]
+    Q_cond_PEN_right, Q_cond_IC_right         hardwired heat flux into the open right face,
+                                             used when BC_type_right=='Q' [W]
+    fuel_type                               type of fuel (default 'H2')
     """
     def initialize(self):
         # Must run first: Element.initialize() also declares 'thermo_data'
@@ -34,9 +84,8 @@ class SOFC(Element):
         self.options.declare('BC_type_left',  default='T', values=['T', 'Q'],
                              desc="Boundary type shared by PEN and IC on the open left face (segment0): "
                                   "'T' hardwires temperatures T_PEN_BC_left/T_IC_BC_left. " \
-                                  "'Q' leaves the conductive flux at its component default (0 W / adiabatic)"
-                                  "set a nonzero flux via prob.set_val('<path>.segment0.Q_cond_PEN_left', ...) "
-                                  "(and/or Q_cond_IC_left) after setup() if needed.")
+                                  "'Q' hardwires the heat fluxes Q_cond_PEN_left/Q_cond_IC_left "
+                                  "(default 0 W / adiabatic).")
         self.options.declare('BC_type_right', default='Q', values=['T', 'Q'],
                              desc='Same as BC_type_left, for the open right face (segments[-1]), using '
                                   'T_PEN_BC_right/T_IC_BC_right or Q_cond_PEN_right/Q_cond_IC_right.')
@@ -47,10 +96,20 @@ class SOFC(Element):
                              desc='Hardwired IC temperature on the open (left) face of segment0 [K]. '
                                   'Used when BC_type_left=="T".')
         
+        self.options.declare('T_PEN_BC_right', default=973.0,
+                             desc='Hardwired PEN temperature on the open (right) face of segment[-1] [K]. '
+                                  'Used when BC_type_right=="T".')
+        self.options.declare('T_IC_BC_right', default=973.0,
+                             desc='Hardwired IC temperature on the open (right) face of segment[-1] [K]. '
+                                  'Used when BC_type_right=="T".')
+        self.options.declare('Q_cond_PEN_left', default=0,
+                             desc='Hardwired PEN heat flux on the left face of segment0 [W]')
+        self.options.declare('Q_cond_IC_left', default=0,
+                             desc='Hardwired IC heat flux on the left face of segment0 [W]')
         self.options.declare('Q_cond_PEN_right', default=0,
                              desc='Hardwired PEN heat flux on the right face of segment[-1] [W]')
-        self.options.declare('Q_cond_PEN_right', default=0,
-                                     desc='Hardwired PEN heat flux on the right face of segment[-1] [W]')
+        self.options.declare('Q_cond_IC_right', default=0,
+                             desc='Hardwired IC heat flux on the right face of segment[-1] [W]')
         # self.options.declare('statics', default=True, 
         #                      desc='If True, calculate static properties')
 
@@ -212,26 +271,18 @@ class SOFC(Element):
                             spec                   = self.options['thermo_data'],
                             **seg_bc_kwargs)
 
-            ic_cond = HeatConductionStructure(struture='IC', N_segments=self.N_seg_tot)
-            pen_cond = HeatConductionStructure(struture='PEN', N_segments=self.N_seg_tot)
-
-            cond_promotes   = ['length_cell', 'height_cell','thickness_struct', 'lambda_struct', 'n_cell']
-            #ic_promotes     = [('T_cell_left',  'T_IC_left'),
-                             #('T_cell_right', 'T_IC')]
-            #pen_promotes    = [('T_cell_left',  'T_IC_left'), ('T_cell_right', 'T_PEN')]
-            #ic_promotes     = ic_promotes.append(cond_promotes)
-            #pen_promotes    = pen_promotes.append(cond_promotes)
-
-            if i==0:
-                 cond_promotes += [('T_cell_left',  'T_boundary_left')]
-            # elif i == self.N_seg_tot - 1:
-            #     cond_promotes += [('T_cell_right')]
-            self.add_subsystem(f'{name}_IC_Conduction', ic_cond, promotes_inputs=cond_promotes)
-            self.add_subsystem(f'{name}_PEN_Conduction', pen_cond, promotes_inputs=cond_promotes) 
-
             seg_promotes = [('p_A_out', 'Fl_I_an:tot:P'), ('p_C_out', 'Fl_I_cat:tot:P')]
-             
             if seg_type == 'active':
+                seg_promotes += [('A_seg', 'A_seg_active')]
+            # conduction geometry only exists if the segment builds a link
+            # (not on a segment0 with a 'Q' left face and no right link)
+            has_link = 'T' in (seg.options['left_bc'], seg.options['right_bc'])
+            if has_link:
+                seg_promotes += [('length_seg', f'length_seg_{seg_type}'), 'height_cell',
+                                 'thickness_PEN', 'lambda_PEN',
+                                 'thickness_IC', 'lambda_IC',
+                                 'width_IC', 'height_ch', 'N_IC_walls']
+            if has_link or seg_type == 'active':
                 seg_promotes.append('n_cell')
             if i == 0:
                 # segment0 has no upstream segment to inherit its inlet state
@@ -272,37 +323,18 @@ class SOFC(Element):
             # self.connect(f'{name}.p_A_out',         f'{self.segments[i + 1]}.p_A_out')
             # self.connect(f'{name}.p_C_out',         f'{self.segments[i + 1]}.p_C_out')
 
-            self.connect(f'{name}.T_PEN',           f'{self.segments[i + 1]}_PEN_Conduction.T_PEN_right')
-            self.connect(f'{name}.T_IC',            f'{self.segments[i + 1]}_IC_Conduction.T_IC_right')
-
-            self.connect(f'{name}.T_PEN',           f'{self.segments[i + 1]}.T_PEN_right')
-            self.connect(f'{name}.T_IC',            f'{self.segments[i + 1]}.T_IC_right')
-
-            
             # Conduction across this interface is computed once, by the segment on
-            # the right, as its own left link (T_PEN_left=this segment's T_PEN,
-            # T_PEN=its own state). The flux entering *this* segment from that same
-            # link is that link's Q_cond_PEN_left_out -- cross-wired here instead of
-            # being independently recomputed on this side.
-            if i == self.N_seg_tot - 1:
-                self.set_input_defaults(f'{self.segments[i]}.Q_cond_PEN_right', val= 0, units='W')
-                self.set_input_defaults(f'{self.segments[i]}.Q_cond_IC_right', val= 0, units='W')
-                
-            self.connect(f'{self.segments[i + 1]}_PEN_Conduction.Q_left', f'{name}.Q_cond_PEN_right')
-            self.connect(f'{self.segments[i + 1]}_IC_Conduction.Q_left',  f'{name}.Q_cond_IC_right')
+            # the right, as its own left link (T_PEN_left = this segment's T_PEN).
+            # The flux entering *this* segment through that same link is the
+            # link's Q_cond_PEN_left_out -- cross-wired here instead of being
+            # recomputed on this side.
+            self.connect(f'{name}.T_PEN', f'{self.segments[i + 1]}.T_PEN_left')
+            self.connect(f'{name}.T_IC',  f'{self.segments[i + 1]}.T_IC_left')
 
-            self.connect(f'{name}_PEN_Conduction.Q_right',      f'{name}.Q_cond_PEN_right')
-            self.connect(f'{name}_IC_Conduction.Q_right',      f'{name}.Q_cond_IC_right')
+            self.connect(f'{self.segments[i + 1]}.Q_cond_PEN_left_out', f'{name}.Q_cond_PEN_right')
+            self.connect(f'{self.segments[i + 1]}.Q_cond_IC_left_out',  f'{name}.Q_cond_IC_right')
 
-            self.connect(f'{name}_PEN_Conduction.Q_left')
 
-        # Initial Flowstation connections
-        # Anode: W_in_A/T_A_in/composition_in_A/p_A_out are promoted directly to
-        # Fl_I_an:stat:W/Fl_I_an:tot:T/Fl_I_an:tot:composition/Fl_I_an:tot:P above
-        # (segment0 has no upstream segment to connect() those from -- and those
-        # Fl_I_an:* names are themselves inputs, so connect() couldn't be used
-        # even if it had one). h_A_in/x_in_A/n_in_A ARE real outputs (from
-        # anode_thermo_in/anode_species_in above), so those connects are valid.
         self.connect('h_A_in',                      'segment0.h_A_in')
         self.connect('x_in_A',                      'segment0.x_in_A')
         # n_in_A only exists on segment0 if it's active (see the n_in_A/n_in_C
@@ -310,21 +342,25 @@ class SOFC(Element):
         if self.segment_types['segment0'] == 'active':
             self.connect('n_in_A',                  'segment0.n_in_A')
         # Boundary conditions on the two open faces (segment0's left face,
-        # segments[-1]'s right face). segment0.Q_cond_PEN_right / Q_cond_IC_right
-        # (and, symmetrically, segments[-1].Q_cond_PEN_left / Q_cond_IC_left) are
-        # already wired by the inter-segment loop above -- only the truly open
-        # faces need a boundary value here, and its type ('T' vs 'Q') is what
-        # SegmentSOFC was built with above (left_bc for segment0, right_bc for
-        # segments[-1]). For 'Q', nothing is set here: Q_cond_PEN/IC_left(right)
-        # already default to 0 W (adiabatic) on PENEnergyBalance/ICEnergyBalance;
-        # set a nonzero flux with prob.set_val(...) after setup() if needed.
+        # segments[-1]'s right face). Every interior face is already wired by the
+        # inter-segment loop above (interior right faces are 'neighbour'). 'T':
+        # the boundary conduction link gets a hardwired neighbour temperature.
+        # 'Q': the segment's flux boundary input Q_*_BC_left/right gets the
+        # hardwired flux (0 W = adiabatic).
+        last = self.segments[-1]
         if self.options['BC_type_left'] == 'T':
             self.set_input_defaults('segment0.T_PEN_left', val=self.options['T_PEN_BC_left'], units='K')
             self.set_input_defaults('segment0.T_IC_left',  val=self.options['T_IC_BC_left'],  units='K')
+        else:
+            self.set_input_defaults('segment0.Q_PEN_BC_left', val=self.options['Q_cond_PEN_left'], units='W')
+            self.set_input_defaults('segment0.Q_IC_BC_left',  val=self.options['Q_cond_IC_left'],  units='W')
 
-        if self.options['BC_type_right'] == 'Q':
-            self.set_input_defaults(f'{self.segments[-1]}.T_PEN_right', val=self.options['T_PEN_BC_right'], units='K')
-            self.set_input_defaults(f'{self.segments[-1]}.T_IC_right',  val=self.options['T_IC_BC_right'],  units='K')
+        if self.options['BC_type_right'] == 'T':
+            self.set_input_defaults(f'{last}.T_PEN_right', val=self.options['T_PEN_BC_right'], units='K')
+            self.set_input_defaults(f'{last}.T_IC_right',  val=self.options['T_IC_BC_right'],  units='K')
+        else:
+            self.set_input_defaults(f'{last}.Q_PEN_BC_right', val=self.options['Q_cond_PEN_right'], units='W')
+            self.set_input_defaults(f'{last}.Q_IC_BC_right',  val=self.options['Q_cond_IC_right'],  units='W')
 
         # Cathode: same reasoning as the anode block above.
         self.connect('h_C_in',                       'segment0.h_C_in')
@@ -332,11 +368,6 @@ class SOFC(Element):
         if self.segment_types['segment0'] == 'active':
             self.connect('n_in_C',                  'segment0.n_in_C')
 
-        # Output Flowstation Connections
-        # Last segment's outlet state -> pyCycle Fl_O_an/Fl_O_cat ports.
-        # (mirrors the single-segment pattern documented in SOFCThermoAdd's
-        # docstring: Thermo(mode='total_TP') for tot:*, direct connect for
-        # stat:W since total_TP has no W input/output.)
         anode_out = Thermo(mode='total_TP', fl_name='Fl_O_an:tot',
                            method='CEA',
                            thermo_kwargs={'composition': self.Fl_O_data['Fl_O_an'],
@@ -357,9 +388,7 @@ class SOFC(Element):
         self.connect(f'{self.segments[-1]}.composition_out_C', 'cathode_out.composition')
         self.connect(f'{self.segments[-1]}.T_C_out',            'cathode_out.T')
 
-        # Fl_O_*:stat:W has no natural source: total_TP mode has no W input/output,
-        # so there's nothing to promote it from -- a tiny pass-through gives it a
-        # real output to connect() the last segment's mass flow into.
+
         self.add_subsystem('anode_out_W',
                            om.ExecComp('W_out = W_in', W_out={'units': 'kg/s'}, W_in={'units': 'kg/s'}),
                            promotes_outputs=[('W_out', 'Fl_O_an:stat:W')])
@@ -372,24 +401,15 @@ class SOFC(Element):
 
         # Equipotential condition: every active segment sits on the same
         # electrical interconnect, so they all share one terminal voltage
-        # (balances.U_cell). Each segment's current is unknown, solved so
-        # that segment.V_cell matches that shared voltage.
+        # (U_cell, from U_balance below). Each segment's current is unknown,
+        # solved so that segment.V_cell matches that shared voltage.
         segment_current_inputs = {f'I_{segment}': {'units': 'A'} for segment in self.segments_active}
         i_sum_expr = 'I_total = ' + ' + '.join(segment_current_inputs)
         self.add_subsystem('i_sum', om.ExecComp(i_sum_expr, I_total={'units': 'A'}, **segment_current_inputs))
 
-        # rhs:{segment}_I is promoted to the same name as U_cell's own output
-        # (below) rather than connected to it -- connect() requires two
-        # different subsystems, and both live on this same `balances`
-        # BalanceComp instance. Promoting an input and the (single) output that
-        # feeds it to one shared name, at this parent level, is the standard
-        # way to broadcast one component's own solved value back into another
-        # input on itself.
-        balance_input_promotes = [('rhs:U_cell', 'I')]
-        balance_input_promotes += [(f'rhs:{segment}_I', 'U_cell') for segment in self.segments_active]
         balances = self.add_subsystem('balances', om.BalanceComp(),
-                                      promotes_inputs=balance_input_promotes,
-                                      promotes_outputs=['U_cell'])
+                                      promotes_inputs=[(f'rhs:{segment}_I', 'U_cell')
+                                                       for segment in self.segments_active])
 
         for segment in self.segments_active:
             balances.add_balance(f'{segment}_I', val = 1, units='A', eq_units='V' )
@@ -397,34 +417,35 @@ class SOFC(Element):
             self.connect(f'{segment}.V_cell',            f'balances.lhs:{segment}_I')
             self.connect(f'balances.{segment}_I',        f'i_sum.I_{segment}')
 
-        # Sum-of-currents condition: U_cell is unknown, solved so that the
-        # sum of all active-segment currents matches the total stack
-        # current I (promoted from balances' rhs:U_cell above).
-        balances.add_balance('U_cell', val= 1, units='V',
-                             eq_units='A',
-                             lower=0.3, upper=1.2,
-                             use_mult=False, #mult_val=-1
-                             )
-        self.connect('i_sum.I_total',   'balances.lhs:U_cell')
 
-        # Segment-to-segment coupling (T_PEN/T_IC and cross-wired Q_cond chains)
-        # plus the equipotential/sum-of-currents `balances` above form real
-        # algebraic loops across the whole stack -- each SegmentSOFC converges
-        # itself internally, but nothing above drove that outer loop to
-        # convergence.
-        #
-        # NonlinearBlockGS was tried first (matching the originally documented
-        # intent of an outer GS sweep across segments) but doesn't work here:
-        # it has no mechanism to invert an ImplicitComponent's residual (the
-        # `balances` BalanceComp above), so it just leaves I_{segment}/U_cell
-        # sitting at their initial guesses forever while the segments'
-        # thermal states genuinely converge -- and since NLBGS's reported
-        # residual is dominated by those converging quantities, it reports
-        # "Converged" while silently never having solved the electrical
-        # balance at all (confirmed empirically: i_sum.I_total stayed at its
-        # initial-guess sum instead of matching the requested `I`). A flattened
-        # Newton solve, which linearizes and correctly inverts implicit states
-        # wherever they live in the tree, is needed instead.
+        U_balance = self.add_subsystem('U_balance', om.BalanceComp(),
+                                       promotes_inputs=[('rhs:U_cell', 'I')],
+                                       promotes_outputs=['U_cell'])
+        U_balance.add_balance('U_cell', val= 1, units='V',
+                              eq_units='A',
+                              lower=0.3, upper=1.5,
+                              use_mult=False)
+        self.connect('i_sum.I_total',   'U_balance.lhs:U_cell')
+
+        self.add_subsystem('power', om.ExecComp('P_el = U_cell * I * n_cell',
+                                                P_el={'units': 'W'},
+                                                U_cell={'units': 'V'},
+                                                I={'units': 'A'}),
+                           promotes=['*'])
+
+        self.add_subsystem('H2_util_stack',
+                           sofc.SpeciesUtilization(thermo=anode_in_props, species='H2'),
+                           promotes_inputs=[('n_in', 'n_in_A'), ('x_in', 'x_in_A'), 'I', 'n_cell'],
+                           promotes_outputs=[('H2_utilization',  'H2_utilization_stack'),
+                                             ('H2_consumed_mol', 'H2_consumed_stack')])
+        self.add_subsystem('O2_util_stack',
+                           sofc.SpeciesUtilization(thermo=cathode_in_props, species='O2'),
+                           promotes_inputs=[('n_in', 'n_in_C'), ('x_in', 'x_in_C'), 'I', 'n_cell'],
+                           promotes_outputs=[('O2_utilization',  'O2_utilization_stack'),
+                                             ('O2_consumed_mol', 'O2_consumed_stack')])
+        # I feeds U_balance, power and both utilizations; one shared default
+        self.set_input_defaults('I', val=1.0, units='A')
+
         newton = self.nonlinear_solver = om.NewtonSolver(solve_subsystems=True)
         newton.options['maxiter'] = 25
         newton.options['atol'] = 1e-6
