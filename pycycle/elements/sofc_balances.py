@@ -89,25 +89,29 @@ class PENEnergyBalance(om.ImplicitComponent):
 
 class ICEnergyBalance(om.ImplicitComponent):
     """
-    Steady-state energy balance for the interconnect
-    R = Qdot_conv_IC_an + Qdot_conv_IC_cat -  Q_dot_loss + Qdot_conduct_IC_left + Qdot_conduct_IC_right
-    
-    For the IC the segment type doesnt matter. No chemical reaction or Current Flows.
-    I think a source term for joule heating since current is flowing in the IC. 
-    Q_joule = I**2 * A_cell * ASR_IC ? 
+    Steady-state energy balance for the interconnect (IC).
+    R = Qdot_conv_IC_an + Qdot_conv_IC_cat - Q_dot_loss + Qdot_conduct_IC_left + Qdot_conduct_IC_right
+    T_IC is the implicit state solved by the Newton solver.
+
+    For the IC the segment type doesn't matter: no chemical reaction or current flows
+    through the IC itself. Q_dot_loss is currently expected from an upstream source
+    (e.g. Power * percent heat loss) - no dedicated loss-calculation component feeds
+    it yet. A joule-heating term (Q_joule = I**2 * A_cell * ASR_IC) from current
+    flowing through the IC is not currently modeled here.
     """
     def initialize(self):
         self.options.declare('seg_type', default='passive', values=['active', 'passive'])
     def setup(self):
         seg_type = self.options['seg_type']
 
-        self.add_input('Q_conv_IC_A', val=0, units='W', desc= 'Convective heat from anode to IC')
-        self.add_input('Q_conv_IC_C', val=0, units='W', desc= 'Convective heat from cathode to IC')
-        self.add_input('Q_dot_loss', val=0, units='W') # need a seperate component to calculate q_loss using Power and percent heat loss
-        self.add_input('Q_cond_IC_left', val=0, units='W')
-        self.add_input('Q_cond_IC_right', val=0, units='W')
+        self.add_input('Q_conv_IC_A', val=0, units='W', desc='Convective heat from anode to IC')
+        self.add_input('Q_conv_IC_C', val=0, units='W', desc='Convective heat from cathode to IC')
+        self.add_input('Q_dot_loss', val=0, units='W',
+                       desc='External heat loss from the IC (not yet computed by a dedicated component)')
+        self.add_input('Q_cond_IC_left', val=0, units='W', desc='Conductive heat flux, left')
+        self.add_input('Q_cond_IC_right', val=0, units='W', desc='Conductive heat flux, right')
 
-        self.add_output('T_IC', val=1000, units='K')
+        self.add_output('T_IC', val=1000, units='K', desc='IC temperature')
 
         _inputs = ['Q_conv_IC_A', 'Q_conv_IC_C', 'Q_dot_loss', 'Q_cond_IC_left', 'Q_cond_IC_right']
         self.declare_partials('T_IC',        _inputs)
@@ -134,10 +138,14 @@ class ChannelEnergyBalance(om.ImplicitComponent):
     Steady-state energy balance for the anode or cathode flow channel.
 
     Residual:
-        R = Q_conv_channel - Q_conv_PEN - Q_conv_IC [- Q_loss] = 0
+        R = Q_conv_channel - Q_conv_PEN - Q_conv_IC - Q_species [- Q_loss] = 0
 
     where Q_conv_channel = ṁ·(h_out - h_in)  is supplied by heat_convection_channel,
     and Q_conv_PEN / Q_conv_IC are the wall-to-gas convective heat fluxes.
+    Q_species is the absolute enthalpy entering the gas with the species exchanged
+    at the electrode (NernstThermo's Q_species_A / Q_species_C; 0 in passive
+    segments). h is formation-inclusive, so without it the reaction enthalpy
+    would be counted in the gas on top of the PEN source Qdot_chem.
 
     T_channel is the implicit state.  It does not appear directly in R — the
     sensitivity dR/dT_channel = ṁ·cp is seen by the group-level Newton solver
@@ -160,6 +168,8 @@ class ChannelEnergyBalance(om.ImplicitComponent):
                        desc='Convective heat from PEN wall to channel gas')
         self.add_input('Q_conv_IC',      val=0.0, units='W',
                        desc='Convective heat from IC wall to channel gas')
+        self.add_input('Q_species',      val=0.0, units='W',
+                       desc='Absolute enthalpy entering the channel gas with the species exchanged at the electrode')
 
         if self.options['loss']:
             self.add_input('Q_loss',     val=0.0, units='W',
@@ -168,7 +178,7 @@ class ChannelEnergyBalance(om.ImplicitComponent):
         self.add_output('T_channel', val=1000.0, units='K',
                         desc='Channel outlet temperature (implicit state)')
 
-        active_inputs = ['Q_conv_channel', 'Q_conv_PEN', 'Q_conv_IC']
+        active_inputs = ['Q_conv_channel', 'Q_conv_PEN', 'Q_conv_IC', 'Q_species']
         if self.options['loss']:
             active_inputs.append('Q_loss')
 
@@ -178,7 +188,8 @@ class ChannelEnergyBalance(om.ImplicitComponent):
     def apply_nonlinear(self, inputs, outputs, residuals):
         R = (inputs['Q_conv_channel']
              - inputs['Q_conv_PEN']
-             - inputs['Q_conv_IC'])
+             - inputs['Q_conv_IC']
+             - inputs['Q_species'])
 
         if self.options['loss']:
             R -= inputs['Q_loss']
@@ -189,6 +200,7 @@ class ChannelEnergyBalance(om.ImplicitComponent):
         J['T_channel', 'Q_conv_channel'] =  1.0
         J['T_channel', 'Q_conv_PEN']     = -1.0
         J['T_channel', 'Q_conv_IC']      = -1.0
+        J['T_channel', 'Q_species']      = -1.0
         J['T_channel', 'T_channel']      =  0.0  # sensitivity via group Newton only
 
         if self.options['loss']:
@@ -227,9 +239,9 @@ class SpeciesFlowCalc(om.ExplicitComponent):
                        desc= 'array containing all n [mol/g] for all possible species ' \
                        'given the channel elemental composition.') # ChemEq doesnt have units declared for the moles :/
         self.add_input('n_moles', val= 1e-2, units=None, desc='Total molar flow')
-        self.add_input('W', val=1.0, units='g/s')
+        self.add_input('W', val=1.0, units='g/s', desc='Total mass flow of the channel gas')
 
-        self.add_output('n_flow', val=1e-2, units= 'mol/s')
+        self.add_output('n_flow', val=1e-2, units= 'mol/s', desc='Total molar flow, converted from mass flow: n_moles * W')
         self.add_output('x_i', val=np.ones(self._n), units=None,
                         desc='array containing all mole fractions')
         
