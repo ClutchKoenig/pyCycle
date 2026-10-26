@@ -1,12 +1,12 @@
 import openmdao.api as om
 from pycycle.element_base import Element
-from pycycle.sofc_api import SOFCThermoAdd, SegmentSOFC
+from .api import SOFCThermoAdd, SegmentSOFC
 from pycycle.flow_in import FlowIn
 import numpy as np
 from pycycle.thermo.thermo import Thermo
 from pycycle.thermo.cea.species_data import janaf, Properties
 from pycycle.constants import CEA_AIR_COMPOSITION
-import pycycle.sofc_api as sofc
+from . import api as sofc
 
 
 

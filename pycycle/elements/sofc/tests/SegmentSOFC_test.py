@@ -1,7 +1,7 @@
 import numpy as np
 import openmdao.api as om
 
-from pycycle.elements.sofc_segment import SegmentSOFC
+from pycycle.elements.sofc.sofc_segment import SegmentSOFC
 from pycycle.thermo.cea.species_data import Properties, janaf
 from pycycle.thermo.thermo import Thermo
 

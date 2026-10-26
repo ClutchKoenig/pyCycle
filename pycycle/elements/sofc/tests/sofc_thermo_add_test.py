@@ -14,7 +14,7 @@ import openmdao.api as om
 import numpy as np
 
 import pycycle.api as pyc
-from pycycle.elements.sofc_thermo_add import SOFCThermoAdd
+from pycycle.elements.sofc.sofc_thermo_add import SOFCThermoAdd
 
 # ---------------------------------------------------------------------------
 # Inlet composition definitions

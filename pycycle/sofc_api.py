@@ -1,7 +1,2 @@
-
-from pycycle.elements.sofc_balances import ChannelEnergyBalance, PENEnergyBalance, ICEnergyBalance, SpeciesFlowCalc
-from pycycle.elements.sofc_heat import HeatConductionStructure, HeatConvection, HeatConvectionChannel, HeatConvectionElectrode, HeatConduction 
-from pycycle.elements.sofc_reaction import ElectroChemistry
-from pycycle.elements.sofc_thermo_add import SOFCThermoAdd
-from pycycle.elements.sofc_observables import SpeciesUtilization, MassSanityCheck, BulkComposition
-from pycycle.elements.sofc_segment import SegmentSOFC
+# Backwards-compatibility shim: the SOFC API now lives in pycycle.elements.sofc.api
+from pycycle.elements.sofc.api import *

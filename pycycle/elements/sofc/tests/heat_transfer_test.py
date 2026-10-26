@@ -1,6 +1,6 @@
 import openmdao.api as om
 import numpy as np
-from pycycle.sofc_api import HeatConvection, HeatConvectionChannel, HeatConvectionElectrode, HeatConductionStructure, HeatConduction
+from pycycle.elements.sofc.api import HeatConvection, HeatConvectionChannel, HeatConvectionElectrode, HeatConductionStructure, HeatConduction
 
 # Input vars
 Nu = 4.9

@@ -3,7 +3,7 @@ import openmdao.api as om
 
 from pycycle.thermo.thermo import Thermo
 from pycycle.thermo.cea.species_data import Properties, janaf
-import pycycle.sofc_api as sofc
+from . import api as sofc
 
 
 class SegmentSOFC(om.Group):
